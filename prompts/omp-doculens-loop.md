@@ -70,6 +70,17 @@ Commit rules:
 - No unrelated formatting.
 - No skipped tests to make the PR green.
 
+Continuation and blocker ledger:
+- Treat stopping with remaining unblocked work as a failure mode. Keep going until all PRs are merged, or every remaining path is blocked by an external prerequisite that tools cannot resolve.
+- Use OMP `todo` as the live session checklist and keep it current. Mark each finished behavior immediately; append newly discovered work instead of relying on memory.
+- Maintain a local ignored ledger under `.doculens-loop/` so progress survives compaction, session resume, and unexpected stops without polluting PR diffs.
+- Before any intentional stop, context compaction, PR handoff, or long wait, update `.doculens-loop/STATUS.md` with current PR, branch/worktree, active task, running jobs/subagents, latest green/red checks, next action, and exact resume command.
+- When blocked, append to `.doculens-loop/BLOCKERS.md` with timestamp, blocker, evidence, what was tried, why tools cannot resolve it, and the next unblocked task to pursue.
+- A blocker does not stop the loop unless it blocks every remaining useful task. If one path blocks, record it and move to the next safe task/PR slice.
+- Use `job`/`irc` instead of yielding when subagents are still running. Wait for completions, steer agents, or continue other independent work.
+- If OMP stops unexpectedly, resume from `.doculens-loop/STATUS.md`, drain subagent/job results, then continue with the next unblocked task.
+- OMP's documented `session_stop` extension hook can auto-continue, but it is capped at 8 consecutive continuations and does not run for subagents. Do not rely on it as an infinite loop; rely on explicit todo state, blocker ledger, PR sequence, and resume instructions.
+
 Subagent strategy:
 - Use a dedicated Tester agent for tests. Tester writes tests/evals/E2E/smoke checks before implementation.
 - Use implementation agents by subsystem only after contracts are clear.

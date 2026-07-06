@@ -215,7 +215,7 @@ Use the copy/paste loop prompt in:
 prompts/omp-doculens-loop.md
 ```
 
-It tells OMP to start with PR 1, use Tester subagents first, have writing subagents create their own git worktrees for parallel work, keep each PR scoped to one vertical capability, enforce red/green TDD evidence, coordinate shared-file edits through subagents, and preserve the public-repo no-secrets contract.
+It tells OMP to start with PR 1, use Tester subagents first, have writing subagents create their own git worktrees for parallel work, keep each PR scoped to one vertical capability, enforce red/green TDD evidence, record progress/blockers in a local ignored `.doculens-loop/` ledger, coordinate shared-file edits through subagents, and preserve the public-repo no-secrets contract.
 
 ## Planned local commands
 
