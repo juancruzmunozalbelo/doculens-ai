@@ -207,6 +207,16 @@ Implementation should be delivered by vertical PRs, not one PR per checkbox.
 
 Do not open schema-only, interface-only, type-only, UI skeleton-only, Terraform-variable-only, or README-claim-only PRs unless they include the behavior and verification that make the change reviewable.
 
+## OMP loop prompt
+
+Use the copy/paste loop prompt in:
+
+```txt
+prompts/omp-doculens-loop.md
+```
+
+It tells OMP to start with PR 1, use Tester subagents first, create git worktrees for parallel subagent work, keep each PR scoped to one vertical capability, enforce red/green TDD evidence, coordinate shared-file edits through subagents, and preserve the public-repo no-secrets contract.
+
 ## Planned local commands
 
 These commands are planned implementation deliverables. They are not claimed to work until the relevant PRs land.
