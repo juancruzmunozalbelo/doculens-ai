@@ -80,16 +80,18 @@ Subagent strategy:
 Git worktree strategy for subagents:
 - Use git worktrees for parallel subagent implementation, not multiple agents mutating the same checkout.
 - Keep the main checkout clean and reserved for orchestration, PR creation, validation, and final merge.
+- The writing subagent assigned to a PR creates its own worktree from the orchestration checkout. The main/orchestrator defines the target branch/path contract, but the subagent performs the `git worktree add` step and works inside that path.
 - Create one worktree per active PR branch or isolated subsystem spike.
 - Suggested layout from the parent directory:
   - `../doculens-main` or the current repo checkout: orchestration only.
   - `../doculens-foundation`: `feat/doculens-foundation`.
   - `../doculens-auth`: `feat/doculens-auth` only after foundation contracts are stable.
   - `../doculens-ingestion`: `feat/doculens-ingestion` only after schema/document contracts are stable.
-- Before assigning a writing subagent, give it an exact worktree path and branch. The subagent must run `git status -sb` inside that worktree before editing.
+- Before assigning a writing subagent, give it the exact worktree path, branch name, base branch, and allowed file scope. The subagent must create the worktree if it does not exist, enter it, run `git status -sb`, and enable hooks with `git config core.hooksPath .githooks` before editing.
 - A subagent must not edit files outside its assigned worktree.
+- A subagent must not reuse another subagent's worktree unless explicitly handed off.
 - Do not run two worktrees that modify the same shared contract files unless the agents coordinate first and one branch explicitly rebases onto the other.
-- After a PR merges, remove its worktree with `git worktree remove <path>` and prune stale metadata with `git worktree prune`.
+- After a PR merges, the orchestrator removes its worktree with `git worktree remove <path>` and prunes stale metadata with `git worktree prune`.
 
 Recommended agents by PR:
 - PR 1 Foundation: Foundation Agent + Tester.
@@ -125,18 +127,19 @@ Per-PR completion gate:
 PR workflow:
 1. Start from clean `main` in the orchestration checkout.
 2. Pull latest `main` with `git pull --ff-only`.
-3. Create a worktree for the next PR branch, for example `git worktree add ../doculens-foundation -b feat/doculens-foundation main`.
-4. Assign subagents to the PR worktree path, not to the orchestration checkout.
-5. Implement only that PR's scope inside the worktree.
-6. Run targeted checks in the worktree.
-7. Stage and run `.githooks/pre-commit` in the worktree.
-8. Commit coherent green slices in the worktree.
-9. Push the PR branch from the worktree.
-10. Open PR with verification evidence from that worktree.
-11. Wait for `guardrails` status check.
-12. Do not merge until checks pass and review findings are addressed.
-13. Merge with a coherent commit history or squash if the branch history contains local TDD noise.
-14. Return to the orchestration checkout, pull latest `main`, remove the merged worktree, and prune worktree metadata.
+3. Define the next PR branch, worktree path, base branch, and allowed file scope.
+4. Assign the writing subagent to create and use that worktree, for example `git worktree add ../doculens-foundation -b feat/doculens-foundation main`.
+5. Require the subagent to report `git status -sb`, worktree path, branch name, and hook setup before editing.
+6. Implement only that PR's scope inside the worktree.
+7. Run targeted checks in the worktree.
+8. Stage and run `.githooks/pre-commit` in the worktree.
+9. Commit coherent green slices in the worktree.
+10. Push the PR branch from the worktree.
+11. Open PR with verification evidence from that worktree.
+12. Wait for `guardrails` status check.
+13. Do not merge until checks pass and review findings are addressed.
+14. Merge with a coherent commit history or squash if the branch history contains local TDD noise.
+15. Return to the orchestration checkout, pull latest `main`, remove the merged worktree, and prune worktree metadata.
 
 Do not optimize away these scoring areas:
 - owner-scoped authorization
@@ -152,7 +155,7 @@ Do not optimize away these scoring areas:
 - Terraform validation and destroy guidance
 
 First action:
-Start PR 1 on `feat/doculens-foundation`. Use Tester first. Build the smallest foundation slice that proves local commands, PostgreSQL contract, env/secrets contract, schema/migration/seed, and test scripts without implementing auth/RAG/MiniMax/UI/AWS yet.
+Start PR 1 on `feat/doculens-foundation`. Use Tester first, then a Foundation Agent. Assign the Foundation Agent to create `../doculens-foundation` from `main`, enable hooks in that worktree, and build the smallest foundation slice that proves local commands, PostgreSQL contract, env/secrets contract, schema/migration/seed, and test scripts without implementing auth/RAG/MiniMax/UI/AWS yet.
 ```
 
 ## Minimal first command sequence
@@ -163,9 +166,11 @@ git pull --ff-only
 git config core.hooksPath .githooks
 openspec validate --changes build-doculens-ai-assessment
 node --test scripts/guardrails/check-tdd.test.mjs
-git worktree add ../doculens-foundation -b feat/doculens-foundation main
-cd ../doculens-foundation
-git config core.hooksPath .githooks
+# Do not create the implementation worktree yourself if a writing subagent is available.
+# Assign the Foundation Agent to run:
+# git worktree add ../doculens-foundation -b feat/doculens-foundation main
+# cd ../doculens-foundation
+# git config core.hooksPath .githooks
 ```
 
 Then paste the loop prompt above into OMP and start PR 1.
