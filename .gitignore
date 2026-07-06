@@ -36,6 +36,7 @@ logs/
 tmp/
 temp/
 .DS_Store
+.doculens-loop/
 
 # Local harness/private agent configuration
 .codex/
