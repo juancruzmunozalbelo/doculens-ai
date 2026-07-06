@@ -1,0 +1,122 @@
+## 1. Project Setup
+
+- [ ] 1.1 Scaffold React + Node.js app structure with shared configuration and documented local commands
+- [ ] 1.2 Add PostgreSQL local development configuration and shared `DATABASE_URL` contract for local, tests, and AWS
+- [ ] 1.3 Add environment configuration for MiniMax provider without committing secrets
+- [ ] 1.4 Define PostgreSQL schema for users, documents, chunks, analyses, messages, citations, prompt metadata, token estimates, fallback metadata, and ownership relationships
+- [ ] 1.5 Add migration, reset, and seed commands for the PostgreSQL demo workflow
+- [ ] 1.6 Add exact test scripts for unit, integration, Playwright E2E, MarkItDown smoke, eval, and combined verification commands
+- [ ] 1.7 Add placeholder-only `.env.example`, centralized secret redaction utility, and runtime rejection of weak/default `JWT_SECRET` outside explicit test mode
+- [ ] 1.8 Configure the implementation loop to follow TDD for every slice: write or update the failing unit/integration/eval/Playwright/smoke check first, observe red, implement, then refactor while keeping the check green
+
+## 2. Authentication and Ownership
+
+- [ ] 2.1 Implement user registration and login with hashed passwords and expiring JWTs
+- [ ] 2.2 Add authenticated middleware and current-user context for backend routes
+- [ ] 2.3 Implement owner-scoped document create, list, read, and delete endpoints
+- [ ] 2.4 Ensure document CRUD queries include both resource ID and current user ID
+- [ ] 2.5 Ensure analysis, chat/message, retrieved chunk, citation, and delete/cascade queries authorize through parent document ownership
+- [ ] 2.6 Add seeded demo user, second authz-test user, seeded NDA document, and adversarial prompt-injection document section
+
+## 3. Ingestion, Chunking, Retrieval, and Fallback
+
+- [ ] 3.1 Implement Markdown/text normalization for submitted document content
+- [ ] 3.2 Implement section-aware chunking with stable chunk IDs, heading paths, chunk indexes, and token estimates
+- [ ] 3.3 Persist chunks linked to owner-scoped documents in PostgreSQL
+- [ ] 3.4 Define `RetrievalProvider` and retrieved chunk response shape with retrieval backend metadata
+- [ ] 3.5 Implement pgvector or hybrid retrieval as the preferred target, including embedding generation/storage path when provider credentials are available
+- [ ] 3.6 Implement lexical retrieval only as a labeled `lexical_fallback` if the embedding provider blocks implementation or credentials
+- [ ] 3.7 Define deterministic retrieval coverage policy with relevance threshold, low-coverage reason, global-question trigger, and retrieval backend label
+- [ ] 3.8 Implement fallback decision function returning `rag`, `fallback`, or `unsupported` with fallback reason and retrieval score summary
+- [ ] 3.9 Expose retrieved chunks, retrieval backend, context strategy, fallback reason, and retrieval score summary through chat response and UI metadata
+
+## 4. AI Provider and Prompting
+
+- [ ] 4.1 Define `AIProvider` interface separating prompt construction, model invocation, and response post-processing
+- [ ] 4.2 Implement prompt IDs and prompt versions for analysis, chat, fallback, unsupported-answer checks, and prompt-injection guardrails
+- [ ] 4.3 Implement `MiniMaxProvider` using configured base URL, API key, and `MiniMax-M3` model
+- [ ] 4.4 Add live MiniMax smoke command or test that invokes MiniMax M3 with redacted logs and validates response shape, provider metadata, model metadata, and error handling
+- [ ] 4.5 Add prompt-injection guardrails treating document content as untrusted evidence only
+- [ ] 4.6 Ensure prompt construction delimits untrusted document/chunk text and never includes API keys, JWTs, or plaintext secrets
+- [ ] 4.7 Record provider, model, prompt version, context strategy, thinking mode, retrieved chunk IDs, fallback reason, retrieval score summary, and token estimates in AI responses
+- [ ] 4.8 Add MiniMax live-call budget gate for max calls per command, max input/output tokens, max context tokens, timeout, retry/backoff cap, concurrency limit, and per-run estimated cost
+- [ ] 4.9 Add explicit live MiniMax opt-in/disclosure for analysis, chat, fallback, eval, and E2E paths, including maximum document/context size rules
+- [ ] 4.10 Add centralized redaction for MiniMax API keys, JWT secrets, database URLs/passwords, authorization headers, raw document text, full prompts, provider responses, and stack traces
+
+## 5. Analysis and Chat Behavior
+
+- [ ] 5.1 Implement document analysis endpoint using full-document MiniMax context and structured JSON output
+- [ ] 5.2 Validate and persist structured analysis with summary, entities, obligations, risks, uncertainties, and provider/model metadata
+- [ ] 5.3 Implement chat endpoint that retrieves chunks before model invocation for normal questions
+- [ ] 5.4 Build grounded chat prompt from retrieved chunks and require chunk-based citations for RAG answers
+- [ ] 5.5 Validate citations against retrieved chunk IDs and reject or mark invalid fabricated citations
+- [ ] 5.6 Implement unsupported-answer behavior for questions without document support
+- [ ] 5.7 Implement explicit fallback path for low retrieval coverage or global reasoning questions with fallback metadata and uncertainty
+- [ ] 5.8 Ensure prompt-injection attempts in document content cannot override system instructions, reveal secrets, or forge citations
+
+## 6. Frontend Experience
+
+- [ ] 6.1 Implement login route or view for seeded and registered users
+- [ ] 6.2 Implement document input route or view with authenticated submit flow and loading, error, and empty states
+- [ ] 6.3 Implement analysis/chat route or view for a selected document
+- [ ] 6.4 Display structured analysis fields including summary, entities, obligations, risks, and uncertainties
+- [ ] 6.5 Add chat input, answer rendering, citation display, unsupported-answer display, and fallback/uncertainty display
+- [ ] 6.6 Display retrieved chunks and AI transparency metadata including model, provider, context strategy, prompt version, thinking mode, retrieved chunk IDs, fallback reason, retrieval score summary, and token estimates
+- [ ] 6.7 Add canonical `data-testid` attributes: `auth.email-input`, `auth.password-input`, `auth.login-submit`, `document.title-input`, `document.content-input`, `document.submit`, `document.analyze`, `analysis.panel`, `analysis.summary`, `chat.input`, `chat.submit`, `chat.answer`, `chat.citations`, `chat.retrieved-chunks`, `ai.metadata`, `state.loading`, `state.error`, `state.empty`, and `answer.unsupported`
+
+## 7. Evaluation and Security Proof
+
+- [ ] 7.1 Implement `npm run eval` runner using PostgreSQL and MiniMax provider mode with configured `MINIMAX_API_KEY`
+- [ ] 7.2 Eval seeded user, second user, seeded document, adversarial section, and chunk creation
+- [ ] 7.3 Eval retrieval returns top-k chunks for a supported seeded question and records context strategy `rag`
+- [ ] 7.4 Eval fallback question records context strategy `fallback`, fallback reason, retrieval score summary, uncertainty, and citation policy
+- [ ] 7.5 Eval structured analysis schema validity and MiniMax provider/model metadata
+- [ ] 7.6 Eval chat citations map only to retrieved chunk IDs
+- [ ] 7.7 Eval unsupported seeded question returns refusal or unsupported response without fabricated citations
+- [ ] 7.8 Eval prompt-injection attempt is ignored, citations remain valid, and no hidden prompt, API key, JWT, or secret is exposed
+- [ ] 7.9 Eval second user cannot access seeded user's document, analysis, messages, chunks, citations, chat endpoint, or delete path
+- [ ] 7.10 Ensure eval output prints concise pass/fail lines and exits non-zero on failure
+- [ ] 7.11 Add focused unit tests for chunking, retrieval scoring, fallback decision logic, citation validation, prompt metadata, prompt construction guardrails, schema parsing, and unsupported-answer decisions
+- [ ] 7.12 Add integration tests for auth, owner-scoped documents, child-resource denial, ingestion, analysis, chat, fallback/refusal routing, prompt-injection guardrail behavior, and cross-user denial using PostgreSQL
+- [ ] 7.13 Add Playwright E2E test for login/document input/analysis/chat/citations/retrieved chunks/unsupported-answer/AI metadata using only canonical `data-testid` locators
+- [ ] 7.14 Add MiniMax budget/rate-limit tests proving over-budget requests skip provider invocation and eval prints call/token totals
+- [ ] 7.15 Add secret/document redaction canary tests covering stdout, stderr, app logs, eval output, error responses, and provider error logs
+- [ ] 7.16 Add PostgreSQL integrity tests for foreign keys, unique chunk IDs per document, same-document citation/message/chunk relationships, orphan rejection, delete/soft-delete visibility, transaction rollback, and migration/reset idempotency
+
+## 8. MarkItDown and Documentation
+
+- [ ] 8.1 Add MarkItDown PDF conversion script for sample PDF to Markdown conversion
+- [ ] 8.2 Add sample PDF or documented sample path and generated Markdown workflow
+- [ ] 8.3 Add MarkItDown smoke command that converts the sample PDF and verifies converted Markdown creates chunks
+- [ ] 8.4 Document local quick start, PostgreSQL setup, demo seed, eval, and MiniMax configuration
+- [ ] 8.5 Document architecture, RAG design, fallback policy, MiniMax M3 design, prompt-injection rules, citation validation, and unsupported-answer behavior
+- [ ] 8.6 Document canonical Playwright `data-testid` matrix
+- [ ] 8.7 Document data retention, PII/logging policy, audit metadata, cost/rate-limit strategy, and known limitations
+- [ ] 8.8 Document optional AWS Lambda/container-image MarkItDown conversion path, including S3 object flow, timeout, size limit, IAM, packaging, and log-redaction considerations
+- [ ] 8.9 Document third-party MiniMax data transfer disclosure, non-sensitive demo input guidance, live AI opt-in, provider retention/training assumptions or unknowns, and maximum document/context size limits
+
+## 9. AWS Demo Infrastructure
+
+- [ ] 9.1 Add Dockerfile/container build path for one app container serving the React build and Node API
+- [ ] 9.2 Add app health endpoint for ALB target checks
+- [ ] 9.3 Add Terraform provider, variables, outputs, and README under `infra/aws`
+- [ ] 9.4 Add Terraform resources for ECR or explicit `image_uri` contract, ECS cluster, Fargate task/service, public ALB, target group, listener, and health check
+- [ ] 9.5 Add Terraform resources for RDS PostgreSQL with security group access restricted to the app service
+- [ ] 9.6 Add Terraform resources for Secrets Manager, IAM task execution role, and CloudWatch log group
+- [ ] 9.7 Ensure Terraform uses sensitive variables or secret bindings and does not require committed plaintext secrets
+- [ ] 9.8 Ensure Terraform creates/references secret containers or external secret ARNs without managing `secret_string` values or plaintext secrets in Terraform state
+- [ ] 9.9 Set bounded demo defaults: ECS desired count 1, small Fargate CPU/memory, minimal single-AZ RDS/storage, no NAT gateway, deletion protection false, and skip final snapshot true
+- [ ] 9.10 Add Terraform validation, plan review, optional apply, ALB health smoke, destroy, cleanup verification, and estimated cost instructions for the AWS demo account
+- [ ] 9.11 Run or document `terraform fmt -check`, `terraform validate`, and expected plan shape results
+
+## 10. Final Verification
+
+- [ ] 10.1 Run local setup from README commands on a clean environment path with PostgreSQL
+- [ ] 10.2 Run migrations/reset and `npm run demo:seed`; verify seeded users, seeded document, adversarial section, and chunks exist
+- [ ] 10.3 Run `AI_PROVIDER=minimax npm run eval` with the configured MiniMax M3 API key and verify all required checks pass
+- [ ] 10.4 Run unit, integration, and Playwright E2E test commands and verify they pass
+- [ ] 10.5 Run MarkItDown smoke command and verify converted Markdown creates chunks
+- [ ] 10.6 Smoke test React login, document input, analysis/chat, citations, retrieved chunks, unsupported-answer, and AI metadata manually
+- [ ] 10.7 Smoke test MiniMax provider with the real API key, redacted logs, response-shape validation, and model/provider metadata verification
+- [ ] 10.8 Run or document Terraform validation and plan shape; optionally apply in AWS demo account, verify ALB health URL, then destroy
+- [ ] 10.9 Verify README accurately distinguishes implemented behavior, demo-grade AWS infrastructure, optional Lambda MarkItDown extension, costs, destroy guidance, and production gaps

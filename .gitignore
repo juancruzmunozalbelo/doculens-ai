@@ -1,0 +1,48 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+build/
+coverage/
+.next/
+.vite/
+.cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.enc
+
+# Terraform local state and plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Logs and local runtime files
+*.log
+logs/
+tmp/
+temp/
+.DS_Store
+
+# Local harness/private agent configuration
+.codex/
+.pi/
+.omp/
+
+# IDE/editor
+.idea/
+.vscode/
+*.swp
