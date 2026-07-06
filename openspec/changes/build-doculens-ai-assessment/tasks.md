@@ -120,3 +120,20 @@
 - [ ] 10.7 Smoke test MiniMax provider with the real API key, redacted logs, response-shape validation, and model/provider metadata verification
 - [ ] 10.8 Run or document Terraform validation and plan shape; optionally apply in AWS demo account, verify ALB health URL, then destroy
 - [ ] 10.9 Verify README accurately distinguishes implemented behavior, demo-grade AWS infrastructure, optional Lambda MarkItDown extension, costs, destroy guidance, and production gaps
+
+## 11. PR Delivery Guardrails
+
+- [ ] 11.1 Keep PR 0 as the committed TDD guardrail baseline: local pre-commit hook, GitHub Actions guardrail, and protected `main` requiring the `guardrails` status check
+- [ ] 11.2 Deliver PR 1 on `feat/doculens-foundation` for project setup tasks 1.1-1.8 with PostgreSQL, env/secrets, schema, migrations, seed, and test command proof
+- [ ] 11.3 Deliver PR 2 on `feat/doculens-auth` for authentication and ownership tasks 2.1-2.6 with cross-user denial and child-resource authorization tests
+- [ ] 11.4 Deliver PR 3 on `feat/doculens-ingestion` for ingestion/chunking tasks 3.1-3.3 with chunking, rollback, ownership, and PostgreSQL integrity tests
+- [ ] 11.5 Deliver PR 4 on `feat/doculens-retrieval` for retrieval/fallback tasks 3.4-3.9 with pgvector/hybrid preferred, labeled `lexical_fallback` only if blocked, backend metadata, and fallback policy tests
+- [ ] 11.6 Deliver PR 5 on `feat/doculens-minimax` for AI provider and prompt safety tasks 4.1-4.10 with MiniMax live-smoke shape validation, budget gates, prompt-injection guardrails, and redaction canaries
+- [ ] 11.7 Deliver PR 6 on `feat/doculens-chat-api` for analysis/chat tasks 5.1-5.8 with structured analysis, RAG citations, unsupported-answer behavior, fallback metadata, and prompt-injection eval proof
+- [ ] 11.8 Deliver PR 7 on `feat/doculens-ui` for frontend tasks 6.1-6.7 with Playwright E2E using only canonical `data-testid` locators
+- [ ] 11.9 Deliver PR 8 on `feat/doculens-eval` for eval/security proof tasks 7.1-7.16 gaps, including retrieval, fallback, citations, unsupported answers, prompt injection, authz, redaction, budget, and PostgreSQL integrity checks
+- [ ] 11.10 Deliver PR 9 on `feat/doculens-markitdown` for MarkItDown tasks 8.1-8.3 with sample PDF-to-Markdown smoke proof into the ingestion/chunking pipeline
+- [ ] 11.11 Deliver PR 10 on `feat/doculens-aws-demo` for AWS tasks 9.1-9.11 with Terraform validation, bounded cost defaults, secret-state safety, ALB health contract, and destroy guidance
+- [ ] 11.12 Deliver PR 11 on `docs/doculens-final-readme` for documentation and final verification tasks 8.4-8.9 and 10.1-10.9, ensuring README claims match observed behavior
+- [ ] 11.13 For every implementation PR, write or update the failing unit/integration/eval/Playwright/smoke check first, observe red locally, implement the smallest passing behavior, observe green, and commit test plus implementation together as a coherent green behavior
+- [ ] 11.14 Do not open schema-only, interface-only, type-only, UI skeleton-only, Terraform-variable-only, or README-claim-only PRs unless the PR also includes the behavior and verification that make the change reviewable

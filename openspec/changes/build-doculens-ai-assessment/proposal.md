@@ -12,6 +12,7 @@ The assessment requires a credible full-stack AI application that demonstrates p
 - Add a MarkItDown PDF conversion script as the safe default for PDF ingestion proof; document AWS Lambda/container-image conversion as an optional production extension, while web PDF upload remains optional unless all upload controls are implemented.
 - Add a tiny AWS demo Terraform stack for the challenge account: buildable app container, ECS Fargate service, public ALB, health endpoint, RDS PostgreSQL, Secrets Manager, CloudWatch logs, bounded cost defaults, and least-necessary security groups.
 - Add README coverage for setup, architecture, RAG design, MiniMax M3 usage, evaluation, security/data policy, AWS demo deployment, cost/destroy guidance, trade-offs, and known limitations.
+- Deliver the implementation through small, reviewable PRs grouped by vertical capability rather than one PR per checkbox: foundation, auth/ownership, ingestion/chunking, retrieval/fallback, MiniMax/safety, analysis/chat/citations, frontend/E2E, eval/security proof, MarkItDown, AWS demo, and final README/verification.
 
 ## Capabilities
 
@@ -29,6 +30,6 @@ The assessment requires a credible full-stack AI application that demonstrates p
 - Frontend: React login/document input/analysis-chat routes with AI-aware transparency, stable `data-testid` locators, and error/loading/empty/unsupported states.
 - Database: PostgreSQL schema for users, documents, chunks, analyses, messages, citations, prompt/model metadata, token estimates, and ownership relationships.
 - AI/provider integration: MiniMax M3 configuration, live API-key based invocation, prompt construction, model invocation, response parsing, citation validation, prompt-injection guardrails, explicit external-AI disclosure, live-call budget gates, redacted logs, and live smoke verification.
-- Tooling: demo seed command, eval command, unit/integration test commands, Playwright E2E command, canonical test-id matrix, MarkItDown smoke command, Docker/container build path, and Terraform validation/apply/destroy commands.
+- Tooling: demo seed command, eval command, unit/integration test commands, Playwright E2E command, canonical test-id matrix, MarkItDown smoke command, Docker/container build path, Terraform validation/apply/destroy commands, local pre-commit TDD guardrail, GitHub Actions TDD guardrail, and branch protection requiring the guardrail check.
 - Infrastructure: Terraform under `infra/aws` for ECR, ECS Fargate, ALB, RDS PostgreSQL, Secrets Manager, CloudWatch, IAM, cost-capped defaults, health checks, and security groups.
 - Documentation: README with local demo contract, AWS demo contract, security/data policy, cost/rate-limit strategy, Lambda MarkItDown extension, and production trade-offs.

@@ -177,6 +177,31 @@ Alternatives considered:
 - Only eval runner: proves AI demo contracts, but misses lower-level regressions and UI behavior.
 - Snapshot-heavy E2E tests: brittle and low signal for this challenge.
 
+### 14. Deliver by vertical PRs, not one PR per checkbox
+
+Implementation will be split by reviewable capability slices. A PR must contain the behavior, the corresponding unit/integration/eval/Playwright/smoke proof, and any contract metadata/docs needed to review that behavior. Do not create PRs for schema-only, interface-only, type-only, UI skeleton-only, Terraform-variable-only, or README-claim-only changes unless they are attached to a working behavior.
+
+Recommended PR sequence:
+
+| PR | Branch | Scope | Primary tasks |
+| --- | --- | --- | --- |
+| 0 | `main` | TDD guardrails, pre-commit hook, CI guardrail, branch protection | Repository guardrails |
+| 1 | `feat/doculens-foundation` | App scaffold, PostgreSQL contract, env/secrets contract, schema, migrations, seed, test scripts | 1.1-1.8 |
+| 2 | `feat/doculens-auth` | Registration/login, JWT middleware, owner-scoped documents, child-resource authz, seeded users/documents | 2.1-2.6 |
+| 3 | `feat/doculens-ingestion` | Markdown normalization, section-aware chunking, chunk persistence, PostgreSQL integrity | 3.1-3.3 plus relevant 7.11/7.12/7.16 tests |
+| 4 | `feat/doculens-retrieval` | `RetrievalProvider`, pgvector/hybrid preferred target, labeled lexical fallback only if blocked, deterministic coverage/fallback metadata | 3.4-3.9 |
+| 5 | `feat/doculens-minimax` | `AIProvider`, `MiniMaxProvider`, prompt IDs/versions, prompt safety, redaction, live-call budget gates, live smoke shape validation | 4.1-4.10 |
+| 6 | `feat/doculens-chat-api` | Full-document analysis, RAG chat, citation validation, unsupported-answer behavior, fallback path, prompt-injection resistance | 5.1-5.8 |
+| 7 | `feat/doculens-ui` | Login, document input, analysis/chat views, citations, retrieved chunks, AI metadata, canonical `data-testid` E2E path | 6.1-6.7 and 7.13 |
+| 8 | `feat/doculens-eval` | Eval runner, seeded checks, retrieval/fallback/citation/unsupported/prompt-injection/authz/redaction/data-integrity proof | 7.1-7.16 gaps not already covered |
+| 9 | `feat/doculens-markitdown` | MarkItDown sample conversion script, sample workflow, smoke check into ingestion/chunking | 8.1-8.3 |
+| 10 | `feat/doculens-aws-demo` | Docker/container path, ALB health, Terraform ECS/RDS/Secrets/CloudWatch, bounded defaults, validation/apply/destroy docs | 9.1-9.11 |
+| 11 | `docs/doculens-final-readme` | Final README, verification evidence, production gaps, data/cost/rate/AWS/MiniMax disclosures | 8.4-8.9 and 10.1-10.9 |
+
+Commit cadence inside each PR must preserve TDD evidence without fighting the guardrail: write the failing check locally, observe red, implement the smallest passing behavior, observe green, then commit the test and implementation together as one coherent green behavior. Test-only commits are acceptable; implementation-only commits are not.
+
+PRs may run in parallel only after their upstream contracts are stable. Auth, ownership, retrieval/fallback, MiniMax safety, analysis/chat citations, and eval proof should not be compressed away because they are the assessment scoring spine.
+
 ## Risks / Trade-offs
 
 - [Risk] Lexical retrieval may look like fake RAG. → Mitigation: keep it behind `RetrievalProvider`, expose retrieved chunks, validate citations, test fallback/refusal paths, and document pgvector/hybrid search as production backing.
