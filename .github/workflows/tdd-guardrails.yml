@@ -1,0 +1,33 @@
+name: TDD Guardrails
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run guardrail unit tests
+        run: node --test scripts/guardrails/check-tdd.test.mjs
+
+      - name: Check pull request TDD companions
+        if: github.event_name == 'pull_request'
+        run: node scripts/guardrails/check-tdd.mjs --range "${{ github.event.pull_request.base.sha }}...${{ github.sha }}"
+
+      - name: Check pushed TDD companions
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: node scripts/guardrails/check-tdd.mjs --range "${{ github.event.before }}...${{ github.sha }}"
