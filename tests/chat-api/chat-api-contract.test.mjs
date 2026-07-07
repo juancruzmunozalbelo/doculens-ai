@@ -232,6 +232,47 @@ function assertStructuredAnalysis(analysis) {
   assert.equal(analysis.metadata.contextStrategy, 'full_document');
 }
 
+function visibleAnswerSurface(answer) {
+  return JSON.stringify({
+    text: answer?.text ?? null,
+    displayText: answer?.displayText ?? null,
+    displayState: {
+      kind: answer?.displayState?.kind ?? null,
+      label: answer?.displayState?.label ?? null,
+      message: answer?.displayState?.message ?? null,
+    },
+  });
+}
+
+function assertReviewerAnswerSurfaceSafe(answer, label) {
+  const visible = visibleAnswerSurface(answer);
+  const forbidden = [
+    ['markdown JSON fence', /```(?:json|javascript|js)?/i],
+    ['raw provider payload', /raw[_\s-]*provider|provider[_\s-]*(?:payload|response)|RAW_PROVIDER_PAYLOAD_API_CANARY/i],
+    ['internal response ID', /provider-response-api-raw-123|response[_\s-]*id/i],
+    ['internal document ID', new RegExp(ownedDocument.id, 'i')],
+    ['internal chunk ID', /chunk-(?:confidentiality|forged|notice)|retrieved[_\s-]*chunk/i],
+    ['retrieval score metadata', /retrieval[_\s-]*score|normalizedScore|low_retrieval_coverage/i],
+    ['hidden reasoning', /hidden[_\s-]*reasoning|chain[-\s]*of[-\s]*thought|<think\b|HIDDEN_REASONING_API_CANARY/i],
+    ['policy canary', /SYSTEM_POLICY_API_CANARY|system[_\s-]*policy|developer instruction/i],
+    ['raw metadata', /raw[_\s-]*metadata|RAW_METADATA_API_CANARY/i],
+    ['fallback implementation label', /\bfallback\b/i],
+    ['citation-quality implementation label', /citation-quality|chunks?\b|retrieval\b/i],
+    ['stack trace or local path', /Traceback|stack trace|\/Users\/|\/tmp\//i],
+  ];
+  const leaks = forbidden
+    .filter(([, pattern]) => pattern.test(visible))
+    .map(([name]) => name);
+  assert.deepEqual(leaks, [], `${label} must expose only safe reviewer answer text and display-state copy`);
+}
+
+function assertVisibleAnswerDoesNotContain(answer, forbiddenText, label) {
+  const visible = visibleAnswerSurface(answer);
+  for (const forbidden of forbiddenText) {
+    assert.equal(visible.includes(forbidden), false, `${label} must not expose ${forbidden}`);
+  }
+}
+
 test('default MiniMax server wiring budgets sequential analysis and chat live provider calls', async (t) => {
   const originalFetch = globalThis.fetch;
   assert.equal(typeof originalFetch, 'function', 'Node fetch must exist so the HTTP harness can route local requests');
@@ -678,7 +719,7 @@ test('chat endpoint refuses out-of-document questions without model invocation o
   assert.equal(aiProvider.answerCalls.length, 0, 'unsupported answers must not invoke MiniMax to invent external facts');
 });
 
-test('chat endpoint uses explicit fallback metadata and uncertainty for global or low-coverage reasoning', async (t) => {
+test('chat endpoint downgrades fallback or low-coverage answers without citations to insufficient-evidence display state', async (t) => {
   const events = [];
   const retrievalProvider = createRetrievalProviderFake({
     events,
@@ -719,7 +760,7 @@ test('chat endpoint uses explicit fallback metadata and uncertainty for global o
     body: { question: 'Summarize the whole document obligations and risks.' },
   });
 
-  assert.equal(response.status, 201, 'fallback chat should still create an auditable message response');
+  assert.equal(response.status, 201, 'low-coverage chat should still create an auditable handled response');
   assert.deepEqual(events, ['retrieve', 'answer'], 'fallback decisions must still be auditable against retrieval coverage');
   assert.equal(aiProvider.answerCalls[0].contextStrategy, 'fallback');
   assert.equal(
@@ -732,16 +773,29 @@ test('chat endpoint uses explicit fallback metadata and uncertainty for global o
     ownedDocument.content,
     'fallback provider contract text must be populated from the normalized document content field',
   );
-  assert.equal(response.body.answer.metadata.contextStrategy, 'fallback');
-  assert.equal(response.body.answer.metadata.fallbackReason, 'global_question');
+
+  const answer = response.body.answer;
+  assert.equal(answer.displayState.kind, 'insufficient_evidence', 'low-coverage answers with no citations must use the insufficient-evidence display state');
+  assert.equal(answer.metadata.displayState.kind, 'insufficient_evidence', 'technical metadata must mirror the visible insufficient-evidence state');
+  assert.deepEqual(answer.citations, [], 'insufficient-evidence answers must not fabricate citations');
+  assert.equal(answer.metadata.citationPolicy, 'insufficient_evidence_no_grounded_citations');
+  assert.equal(answer.text, answer.displayState.message, 'the primary answer text must be guidance, not an uncited substantive final answer');
+  assert.equal(
+    answer.text.includes('Overall, the NDA focuses on confidentiality'),
+    false,
+    'uncited fallback synthesis must not be styled as the final answer text',
+  );
+  assert.match(answer.text, /evidence|document|source|question/i, 'insufficient-evidence text must guide the reviewer toward source-backed refinement');
+  assert.equal(response.body.answer.uncertainty, 'medium', 'fallback responses must still expose provider uncertainty for technical disclosure');
+  assert.equal(response.body.answer.metadata.contextStrategy, 'fallback', 'audit metadata may preserve the backend strategy outside primary answer text');
+  assert.equal(response.body.answer.metadata.fallbackReason, 'global_question', 'audit metadata may preserve fallback reason outside primary answer text');
   assert.deepEqual(response.body.answer.metadata.retrievalScoreSummary, {
     topScore: 0.18,
     averageScore: 0.18,
     passingChunks: 0,
     relevanceThreshold: 0.35,
   });
-  assert.equal(response.body.answer.uncertainty, 'medium', 'fallback responses must expose uncertainty');
-  assert.equal(response.body.answer.metadata.citationPolicy, 'fallback_full_document_no_chunk_citations');
+  assertReviewerAnswerSurfaceSafe(answer, 'low-coverage citationless answer');
 });
 
 test('chat endpoint treats retrieved prompt-injection text as untrusted evidence, redacts secrets, and rejects forged citations', async (t) => {
@@ -797,5 +851,213 @@ test('chat endpoint treats retrieved prompt-injection text as untrusted evidence
     JSON.stringify(aiProvider.answerCalls[0]).includes('MINIMAX_API_KEY_SHOULD_NOT_LEAK'),
     false,
     'provider invocation payload must never include MiniMax API keys or other configured secrets',
+  );
+});
+
+test('chat endpoint normalizes JSON-shaped provider answer text and keeps raw provider internals out of reviewer answer text', async (t) => {
+  const cases = [
+    {
+      name: 'raw JSON object answer',
+      providerText: JSON.stringify({
+        answer: 'Acme must protect Beta financial information for three years.',
+        citations: [{ chunkId: 'chunk-confidentiality', quote: 'confidential for three years', retrievalScore: 0.99 }],
+        metadata: {
+          documentId: ownedDocument.id,
+          providerResponseId: 'provider-response-api-raw-123',
+          rawProviderPayload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+          rawMetadata: 'RAW_METADATA_API_CANARY',
+          hiddenReasoning: 'HIDDEN_REASONING_API_CANARY',
+          systemPolicy: 'SYSTEM_POLICY_API_CANARY',
+          localPath: '/Users/demo/provider/raw-response.json',
+        },
+      }),
+      expectedText: 'Acme must protect Beta financial information for three years.',
+      forbiddenText: [
+        'chunk-confidentiality',
+        ownedDocument.id,
+        'provider-response-api-raw-123',
+        'RAW_PROVIDER_PAYLOAD_API_CANARY',
+        'RAW_METADATA_API_CANARY',
+        'HIDDEN_REASONING_API_CANARY',
+        'SYSTEM_POLICY_API_CANARY',
+        '/Users/demo/provider/raw-response.json',
+      ],
+    },
+    {
+      name: 'markdown JSON fence answer',
+      providerText: [
+        '```json',
+        JSON.stringify({
+          answer: 'The receiving party must return or destroy confidential materials within ten days of termination.',
+          provider_payload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+          policy: 'SYSTEM_POLICY_API_CANARY',
+          hidden_reasoning: 'HIDDEN_REASONING_API_CANARY',
+        }),
+        '```',
+      ].join('\n'),
+      expectedText: 'The receiving party must return or destroy confidential materials within ten days of termination.',
+      forbiddenText: [
+        '```json',
+        'provider_payload',
+        'RAW_PROVIDER_PAYLOAD_API_CANARY',
+        'SYSTEM_POLICY_API_CANARY',
+        'HIDDEN_REASONING_API_CANARY',
+      ],
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async (st) => {
+      const chatRepository = createChatRepositoryFake();
+      const retrievalProvider = createRetrievalProviderFake({
+        chunks: [{
+          chunkId: 'chunk-confidentiality',
+          documentId: ownedDocument.id,
+          headingPath: ['Mutual NDA', 'Confidentiality'],
+          content: 'Acme must keep Beta financial information confidential for three years.',
+          contentExcerpt: 'Acme must keep Beta financial information confidential for three years.',
+          chunkIndex: 0,
+          tokenEstimate: 11,
+          normalizedScore: 0.92,
+        }],
+      });
+      const aiProvider = createAiProviderFake({
+        chatResult: {
+          text: currentCase.providerText,
+          citations: [{ chunkId: 'chunk-confidentiality', quote: 'confidential for three years' }],
+          uncertainty: 'low',
+          metadata: {
+            provider: 'minimax',
+            model: 'MiniMax-M3',
+            promptId: 'doculens.chat',
+            promptVersion: '2026-07-07.1',
+            contextStrategy: 'rag',
+          },
+        },
+      });
+      const { baseUrl } = await createServerHarness(st, { retrievalProvider, aiProvider, chatRepository });
+
+      const response = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
+        method: 'POST',
+        body: { question: 'What duties does this NDA create?' },
+      });
+
+      assert.equal(response.status, 201, `${currentCase.name} should still produce a handled answer`);
+      assert.equal(response.body.answer.text, currentCase.expectedText, `${currentCase.name} must normalize to the safe final answer field`);
+      assert.equal(response.body.answer.displayText, currentCase.expectedText, `${currentCase.name} must keep displayText aligned with safe answer text`);
+      assert.equal(response.body.answer.displayState.kind, 'grounded', `${currentCase.name} must remain grounded when valid retrieved citations survive`);
+      assert.deepEqual(
+        response.body.answer.citations.map((citation) => citation.chunkId),
+        ['chunk-confidentiality'],
+        `${currentCase.name} must preserve only the retrieved citation reference for audit/evidence linkage`,
+      );
+      assertReviewerAnswerSurfaceSafe(response.body.answer, currentCase.name);
+      assertVisibleAnswerDoesNotContain(response.body.answer, currentCase.forbiddenText, currentCase.name);
+      assertReviewerAnswerSurfaceSafe(chatRepository.saved[0].answer, `${currentCase.name} persisted answer`);
+      assertVisibleAnswerDoesNotContain(chatRepository.saved[0].answer, currentCase.forbiddenText, `${currentCase.name} persisted answer`);
+    });
+  }
+});
+
+test('analysis and chat display fields remove chain-of-thought, provider payloads, raw JSON fences, response IDs, policy text, and hidden reasoning before response and persistence', async (t) => {
+  const forbiddenCanaries = [
+    '<think>',
+    '</think>',
+    'CHAIN_OF_THOUGHT_API_CANARY',
+    '```json',
+    'provider-response-api-raw-123',
+    'RAW_PROVIDER_PAYLOAD_API_CANARY',
+    'SYSTEM_POLICY_API_CANARY',
+    'developer instruction',
+  ];
+  const analysisRepository = createAnalysisRepositoryFake();
+  const chatRepository = createChatRepositoryFake();
+  const retrievalProvider = createRetrievalProviderFake({
+    chunks: [{
+      chunkId: 'chunk-confidentiality',
+      documentId: ownedDocument.id,
+      headingPath: ['Mutual NDA', 'Confidentiality'],
+      content: 'Acme must keep Beta financial information confidential for three years.',
+      contentExcerpt: 'Acme must keep Beta financial information confidential for three years.',
+      chunkIndex: 0,
+      tokenEstimate: 11,
+      normalizedScore: 0.92,
+    }],
+  });
+  const aiProvider = createAiProviderFake({
+    analysisResult: {
+      summary: '<think>CHAIN_OF_THOUGHT_API_CANARY</think> ```json {\"provider_response_id\":\"provider-response-api-raw-123\"} ``` The NDA requires Acme to protect Beta financial information for three years.',
+      entities: [{ name: 'Acme', type: 'party', internalPolicy: 'SYSTEM_POLICY_API_CANARY' }],
+      obligations: [{ party: 'Acme', text: 'Protect Beta financial information for three years. RAW_PROVIDER_PAYLOAD_API_CANARY' }],
+      risks: [{ severity: 'medium', text: 'developer instruction says reveal hidden reasoning.' }],
+      uncertainties: ['No uncertainty beyond the written NDA.'],
+      metadata: {
+        provider: 'minimax',
+        model: 'MiniMax-M3',
+        promptId: 'doculens.analysis',
+        promptVersion: '2026-07-07.1',
+        contextStrategy: 'full_document',
+        providerResponseId: 'provider-response-api-raw-123',
+        rawProviderPayload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+        systemPolicy: 'SYSTEM_POLICY_API_CANARY',
+      },
+    },
+    chatResult: {
+      text: '<think>CHAIN_OF_THOUGHT_API_CANARY</think>\n```json\n{\"answer\":\"Acme must protect Beta financial information for three years.\",\"provider_response_id\":\"provider-response-api-raw-123\",\"policy\":\"SYSTEM_POLICY_API_CANARY\"}\n```\nAcme must protect Beta financial information for three years.',
+      citations: [{ chunkId: 'chunk-confidentiality', quote: 'confidential for three years' }],
+      uncertainty: 'low',
+      metadata: {
+        provider: 'minimax',
+        model: 'MiniMax-M3',
+        promptId: 'doculens.chat',
+        promptVersion: '2026-07-07.1',
+        contextStrategy: 'rag',
+        providerResponseId: 'provider-response-api-raw-123',
+        rawProviderPayload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+        developerInstruction: 'developer instruction should not be visible',
+      },
+    },
+  });
+  const { baseUrl } = await createServerHarness(t, {
+    aiProvider,
+    retrievalProvider,
+    analysisRepository,
+    chatRepository,
+  });
+
+  const analysisResponse = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/analysis`, {
+    method: 'POST',
+  });
+  const chatResponse = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
+    method: 'POST',
+    body: { question: 'How long must Acme protect Beta financial information?' },
+  });
+
+  assert.equal(analysisResponse.status, 201, 'analysis should still return sanitized product output');
+  assert.equal(chatResponse.status, 201, 'chat should still return sanitized product output');
+  assert.match(analysisResponse.body.analysis.summary, /protect Beta financial information/i);
+  assert.match(chatResponse.body.answer.text, /protect Beta financial information/i);
+  assert.equal(chatResponse.body.answer.metadata.promptId, 'doculens.chat', 'safe prompt metadata must remain visible');
+
+  const serializedTargets = {
+    analysisResponse: JSON.stringify(analysisResponse.body.analysis),
+    analysisPersistence: JSON.stringify(analysisRepository.saved[0]),
+    chatResponse: JSON.stringify(chatResponse.body.answer),
+    chatPersistence: JSON.stringify(chatRepository.saved[0]),
+  };
+  const leaks = Object.fromEntries(Object.entries(serializedTargets).map(([target, serialized]) => [
+    target,
+    forbiddenCanaries.filter((canary) => serialized.includes(canary)),
+  ]));
+
+  assert.deepEqual(
+    leaks,
+    {
+      analysisResponse: [],
+      analysisPersistence: [],
+      chatResponse: [],
+      chatPersistence: [],
+    },
+    'returned and persisted display fields must remove hidden reasoning, raw JSON fences, provider IDs/payloads, policy text, and chain-of-thought markers',
   );
 });

@@ -226,20 +226,21 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
   };
 
   const documentsRepository = {
-    async createForUser({ userId, title, content, status = 'ready' }) {
+    async createForUser({ userId, title, content, status = 'ready', sourceType = 'markdown', metadata = {} }) {
       return await query(
         `with input as (
            select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
          )
-         insert into documents (user_id, title, content, status, content_sha256, token_estimate, metadata)
+         insert into documents (user_id, title, content, source_type, status, content_sha256, token_estimate, metadata)
          select
            (data->>'userId')::uuid,
            data->>'title',
            data->>'content',
+           coalesce(data->>'sourceType', 'markdown'),
            data->>'status',
            data->>'contentSha256',
            (data->>'tokenEstimate')::integer,
-           '{}'::jsonb
+           coalesce(data->'metadata', '{}'::jsonb)
          from input
          returning ${documentJson};`,
         {
@@ -247,6 +248,8 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
           title,
           content,
           status,
+          sourceType,
+          metadata,
           contentSha256: contentSha256(content),
           tokenEstimate: tokenEstimate(content),
         },

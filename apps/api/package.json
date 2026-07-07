@@ -6,5 +6,8 @@
   "scripts": {
     "dev": "node src/server/index.mjs",
     "build": "node --check src/server/index.mjs"
+  },
+  "dependencies": {
+    "busboy": "^1.6.0"
   }
 }

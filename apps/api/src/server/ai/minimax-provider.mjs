@@ -180,10 +180,11 @@ function chunksForPrompt(context) {
 }
 
 function safeError(error, secrets) {
-  const message = redactSecrets(error?.message ?? String(error), secrets);
-  const wrapped = new Error(message || 'MiniMax provider failed');
+  const message = redactSecrets(error?.message ?? String(error), secrets).trim();
+  const wrapped = new Error(message || 'AI provider request failed');
   wrapped.code = error?.code;
   wrapped.status = error?.status;
+  wrapped.statusCode = [408, 409, 429, 500, 502, 503, 504].includes(Number(error?.status)) ? 503 : 502;
   return wrapped;
 }
 
