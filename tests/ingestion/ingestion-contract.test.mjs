@@ -374,3 +374,125 @@ test('chunk persistence contract rejects duplicate stable IDs, orphan documents,
     'cross-owner listing must expose no chunks even when the stable ID is known',
   );
 });
+
+test('degraded embedding failures persist lexical chunks with safe fallback metadata and no vector-ready state', async () => {
+  const { createDocumentService } = await importRequired(
+    'apps/api/src/server/documents/service.mjs',
+    ['createDocumentService'],
+    'Document service degraded embedding failure behavior',
+  );
+
+  const documents = createRecordingDocumentRepository();
+  const chunks = createRecordingChunkRepository();
+  const rawTextCanary = 'RAW_EMBEDDING_TEXT_CANARY: proprietary document body must not leak';
+  const embeddingProvider = {
+    async embedTexts(texts) {
+      assert.deepEqual(
+        texts,
+        [`# Root\n\n${rawTextCanary}`],
+        'degraded ingestion must attempt to embed the same normalized chunk content it persists for lexical retrieval',
+      );
+      const error = new Error(`${rawTextCanary} provider failure`);
+      error.code = 'EMBEDDING_PROVIDER_UNAVAILABLE';
+      error.metadata = { rawText: rawTextCanary, vector: [0.111111, 0.222222] };
+      throw error;
+    },
+  };
+  const service = createDocumentService({
+    documents,
+    chunks,
+    ingestion: {
+      normalize: (content) => content.trim(),
+      chunk: ({ documentId, content }) => [
+        {
+          chunkId: `${documentId}:000`,
+          chunkIndex: 0,
+          headingPath: ['Root'],
+          content,
+          tokenEstimate: 8,
+        },
+      ],
+      embeddingProvider,
+      embedding: {
+        enabled: true,
+        strict: false,
+        provider: 'local_hashing',
+        model: 'doculens-local-hashing-v1',
+        dimensions: 384,
+      },
+    },
+  });
+
+  const created = await service.createDocument({
+    currentUser: owner,
+    title: 'Degraded embedding source',
+    content: `# Root\n\n${rawTextCanary}`,
+  });
+  const persisted = chunks.unsafeRows(created.id);
+
+  assert.equal(persisted.length, 1, 'degraded mode must keep the document lexically usable when embedding generation fails safely');
+  assert.equal(persisted[0].content, `# Root\n\n${rawTextCanary}`, 'the lexical chunk content must still be persisted for fallback retrieval');
+  assert.equal(persisted[0].embedding ?? null, null, 'a failed embedding operation must not persist a vector placeholder');
+  assert.equal(persisted[0].embeddingProvider, 'local_hashing', 'failed embedding metadata must still identify the configured provider');
+  assert.equal(persisted[0].embeddingModel, 'doculens-local-hashing-v1', 'failed embedding metadata must still identify the configured model');
+  assert.equal(persisted[0].embeddingDimensions, 384, 'failed embedding metadata must preserve the configured dimension for diagnostics');
+  assert.equal(persisted[0].embeddingStatus, 'failed', 'degraded chunks must be marked as not vector-ready');
+  assert.equal(persisted[0].embeddingErrorCode, 'EMBEDDING_PROVIDER_UNAVAILABLE', 'degraded chunks must record a safe machine-readable embedding failure code');
+  assert.equal(
+    persisted[0].retrievalMetadata?.embedding?.fallbackReason,
+    'embedding_unavailable',
+    'retrieval metadata must route this document to honest lexical fallback rather than pgvector/hybrid',
+  );
+  const serializedMetadata = JSON.stringify({
+    embeddingStatus: persisted[0].embeddingStatus,
+    embeddingErrorCode: persisted[0].embeddingErrorCode,
+    retrievalMetadata: persisted[0].retrievalMetadata,
+  });
+  assert.doesNotMatch(serializedMetadata, /RAW_EMBEDDING_TEXT_CANARY|proprietary document body|0\.111111|0\.222222/i, 'embedding failure metadata must not leak raw text or vector payloads');
+});
+
+test('strict embedding failures fail document ingestion closed without exposing partial vector-ready chunks', async () => {
+  const { createDocumentService } = await importRequired(
+    'apps/api/src/server/documents/service.mjs',
+    ['createDocumentService'],
+    'Document service strict embedding failure behavior',
+  );
+
+  const documents = createRecordingDocumentRepository();
+  const chunks = createRecordingChunkRepository();
+  const embeddingProvider = {
+    async embedTexts() {
+      const error = new Error('embedding provider unavailable for strict mode');
+      error.code = 'EMBEDDING_PROVIDER_UNAVAILABLE';
+      throw error;
+    },
+  };
+  const service = createDocumentService({
+    documents,
+    chunks,
+    ingestion: {
+      normalize: (content) => content.trim(),
+      chunk: ({ documentId, content }) => [
+        { chunkId: `${documentId}:000`, chunkIndex: 0, headingPath: ['Root'], content, tokenEstimate: 4 },
+      ],
+      embeddingProvider,
+      embedding: {
+        enabled: true,
+        strict: true,
+        provider: 'local_hashing',
+        model: 'doculens-local-hashing-v1',
+        dimensions: 384,
+      },
+    },
+  });
+
+  await assert.rejects(
+    service.createDocument({ currentUser: owner, title: 'Strict vector source', content: '# Root\n\nStrict body' }),
+    /embedding provider unavailable|embedding generation failed|EMBEDDING_PROVIDER_UNAVAILABLE|ingestion failed/i,
+    'strict mode must fail closed instead of publishing a lexical-only document as vector-ready',
+  );
+
+  assert.equal(chunks.writes.length, 0, 'strict mode must fail before chunk persistence when required embeddings cannot be produced');
+  const row = documents.unsafeGet('doc-1');
+  assert.ok(row === null || row.status === 'failed', 'strict embedding failure must not leave a ready document with no embeddings');
+});

@@ -52,6 +52,7 @@ test('RetrievalProvider returns owner-scoped top-k chunks with citation-ready me
   const calls = [];
   const provider = createRetrievalProvider({
     preferredBackend: 'hybrid',
+    preferredSearchProvenance: 'postgresql_repository',
     relevanceThreshold: 0.5,
     async preferredSearch({ documentId, userId, query, limit }) {
       calls.push({ documentId, userId, query, limit });
@@ -320,6 +321,7 @@ test('RetrievalProvider filters scope before applying top-k limits so cross-scop
       name: 'preferred backend',
       provider: createRetrievalProvider({
         preferredBackend: 'hybrid',
+        preferredSearchProvenance: 'postgresql_repository',
         relevanceThreshold: 0.5,
         async preferredSearch({ documentId, userId, query, limit }) {
           assert.equal(documentId, request.documentId, 'preferred search must preserve requested document scope');
@@ -346,7 +348,7 @@ test('RetrievalProvider filters scope before applying top-k limits so cross-scop
         },
       }),
       expectedBackend: 'lexical_fallback',
-      expectedFallbackReason: 'embedding_unavailable',
+      expectedFallbackReason: 'retrieval_disabled',
     },
   ];
 
@@ -789,6 +791,9 @@ test('chat response metadata exposes retrieval evidence, backend, strategy, fall
     {
       retrievedChunkIds: ['chunk-injection'],
       retrievalBackend: 'lexical_fallback',
+      configuredBackend: 'lexical_fallback',
+      effectiveBackend: 'lexical_fallback',
+      backendProvenance: null,
       backendFallbackReason: 'embedding_unavailable',
       contextStrategy: 'fallback',
       fallbackReason: 'low_retrieval_coverage',
@@ -821,4 +826,297 @@ test('chat response metadata exposes retrieval evidence, backend, strategy, fall
     false,
     'metadata exposed to chat/UI must carry excerpts rather than raw chunk content so untrusted document text is not leaked as metadata',
   );
+});
+
+test('RetrievalProvider reports lexical_fallback with retrieval_disabled when vector retrieval is intentionally disabled', async () => {
+  const { createRetrievalProvider } = await importRequired(
+    'apps/api/src/server/retrieval/provider.mjs',
+    ['createRetrievalProvider'],
+    'Retrieval disabled fallback taxonomy',
+  );
+
+  const provider = createRetrievalProvider({
+    preferredBackend: 'lexical_fallback',
+    relevanceThreshold: 0.4,
+    async lexicalSearch({ documentId, userId, query, limit }) {
+      assert.equal(documentId, 'doc-disabled', 'lexical fallback must preserve document scope');
+      assert.equal(userId, owner.id, 'lexical fallback must preserve owner scope');
+      assert.equal(query, 'What does the disabled vector source say?', 'lexical fallback must search the user question');
+      assert.equal(limit, 1, 'lexical fallback must preserve top-k');
+      return [
+        {
+          id: 'row-disabled',
+          documentId,
+          userId,
+          chunkId: 'chunk-disabled',
+          chunkIndex: 0,
+          headingPath: ['Disabled Vector Source'],
+          content: 'Lexical retrieval remains available while vector retrieval is disabled.',
+          tokenEstimate: 9,
+          score: 0.62,
+        },
+      ];
+    },
+  });
+
+  const result = await provider.retrieve({
+    documentId: 'doc-disabled',
+    userId: owner.id,
+    query: 'What does the disabled vector source say?',
+    topK: 1,
+  });
+
+  assert.equal(result.configuredBackend, 'lexical_fallback', 'metadata must expose that the operator configured lexical-only retrieval');
+  assert.equal(result.effectiveBackend, 'lexical_fallback', 'effective backend must match the evidence source');
+  assert.equal(result.retrievalBackend, 'lexical_fallback', 'compatibility metadata must still label the effective backend');
+  assert.equal(result.backendFallbackReason, 'retrieval_disabled', 'intentional lexical mode must not be mislabeled as an embedding outage');
+  assert.deepEqual(
+    result.retrievedChunks.map((chunk) => ({
+      chunkId: chunk.chunkId,
+      backend: chunk.retrievalMetadata?.backend,
+      fallbackReason: chunk.retrievalMetadata?.backendFallbackReason,
+    })),
+    [{ chunkId: 'chunk-disabled', backend: 'lexical_fallback', fallbackReason: 'retrieval_disabled' }],
+    'fallback chunks must carry the same honest retrieval-disabled taxonomy as the top-level result',
+  );
+});
+
+test('RetrievalProvider labels pgvector or hybrid only for repository-backed preferred search provenance', async (t) => {
+  const { createRetrievalProvider } = await importRequired(
+    'apps/api/src/server/retrieval/provider.mjs',
+    ['createRetrievalProvider'],
+    'Repository-backed preferred retrieval provenance',
+  );
+
+  const request = {
+    documentId: 'doc-vector-proof',
+    userId: owner.id,
+    query: 'Which vector evidence proves provenance?',
+    topK: 1,
+  };
+  const vectorRow = {
+    id: 'row-vector-proof',
+    documentId: request.documentId,
+    userId: request.userId,
+    chunkId: 'chunk-vector-proof',
+    chunkIndex: 2,
+    headingPath: ['Vector Proof'],
+    content: 'This chunk was returned by the PostgreSQL repository vector search path.',
+    tokenEstimate: 10,
+    score: 0.88,
+  };
+  const lexicalRow = {
+    id: 'row-lexical-proof',
+    documentId: request.documentId,
+    userId: request.userId,
+    chunkId: 'chunk-lexical-proof',
+    chunkIndex: 3,
+    headingPath: ['Lexical Fallback'],
+    content: 'This chunk proves fallback evidence is labeled as lexical fallback.',
+    tokenEstimate: 9,
+    score: 0.51,
+  };
+
+  const cases = [
+    {
+      name: 'option provenance enables pgvector proof',
+      provider: createRetrievalProvider({
+        preferredBackend: 'pgvector',
+        preferredSearchProvenance: 'postgresql_repository',
+        async preferredSearch() {
+          return [vectorRow];
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expected: {
+        backend: 'pgvector',
+        fallbackReason: null,
+        provenance: 'postgresql_repository',
+        chunkId: 'chunk-vector-proof',
+      },
+    },
+    {
+      name: 'object-return provenance enables hybrid proof',
+      provider: createRetrievalProvider({
+        preferredBackend: 'hybrid',
+        async preferredSearch() {
+          return { rows: [vectorRow], backendProvenance: 'postgresql_repository' };
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expected: {
+        backend: 'hybrid',
+        fallbackReason: null,
+        provenance: 'postgresql_repository',
+        chunkId: 'chunk-vector-proof',
+      },
+    },
+    {
+      name: 'missing provenance cannot claim pgvector',
+      provider: createRetrievalProvider({
+        preferredBackend: 'pgvector',
+        async preferredSearch() {
+          return [vectorRow];
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expected: {
+        backend: 'lexical_fallback',
+        fallbackReason: 'preferred_backend_unavailable',
+        provenance: 'lexical_fallback',
+        chunkId: 'chunk-lexical-proof',
+      },
+    },
+    {
+      name: 'test-only provenance cannot claim hybrid',
+      provider: createRetrievalProvider({
+        preferredBackend: 'hybrid',
+        preferredSearchProvenance: 'test_only',
+        async preferredSearch() {
+          return { rows: [vectorRow], backendProvenance: 'test_only' };
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expected: {
+        backend: 'lexical_fallback',
+        fallbackReason: 'preferred_backend_unavailable',
+        provenance: 'lexical_fallback',
+        chunkId: 'chunk-lexical-proof',
+      },
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async () => {
+      const result = await currentCase.provider.retrieve(request);
+
+      assert.equal(result.configuredBackend, currentCase.name.includes('hybrid') ? 'hybrid' : 'pgvector', 'metadata must preserve the configured backend for audit');
+      assert.equal(result.effectiveBackend, currentCase.expected.backend, 'effective backend must match the backend that actually returned evidence');
+      assert.equal(result.retrievalBackend, currentCase.expected.backend, 'compatibility backend must not overclaim vector or hybrid execution');
+      assert.equal(result.backendFallbackReason ?? null, currentCase.expected.fallbackReason, 'fallback reason must explain why preferred proof was unavailable');
+      assert.equal(result.backendProvenance ?? null, currentCase.expected.provenance, 'repository provenance is required before pgvector/hybrid claims are reviewer proof');
+      assert.equal(result.retrievedChunks[0]?.chunkId, currentCase.expected.chunkId, 'returned evidence must come from the honestly labeled backend path');
+      assert.equal(
+        result.retrievedChunks[0]?.retrievalMetadata?.backend,
+        currentCase.expected.backend,
+        'per-chunk metadata must match the effective backend, not the configured or preferred label',
+      );
+    });
+  }
+});
+
+test('RetrievalProvider fallback taxonomy distinguishes disabled retrieval, embeddings, missing chunk embeddings, vector runtime, and missing preferred wiring', async (t) => {
+  const { createRetrievalProvider } = await importRequired(
+    'apps/api/src/server/retrieval/provider.mjs',
+    ['createRetrievalProvider'],
+    'Retrieval fallback taxonomy',
+  );
+
+  const request = {
+    documentId: 'doc-fallback-taxonomy',
+    userId: owner.id,
+    query: 'Which fallback reason applies?',
+    topK: 1,
+  };
+  const lexicalRow = {
+    id: 'row-fallback',
+    documentId: request.documentId,
+    userId: request.userId,
+    chunkId: 'chunk-fallback',
+    chunkIndex: 0,
+    headingPath: ['Fallback'],
+    content: 'Lexical fallback evidence remains available and honestly labeled.',
+    tokenEstimate: 8,
+    score: 0.6,
+  };
+
+  const cases = [
+    {
+      name: 'embedding_unavailable',
+      provider: createRetrievalProvider({
+        preferredBackend: 'pgvector',
+        preferredSearchProvenance: 'postgresql_repository',
+        async preferredSearch() {
+          const error = new Error('embedding provider unavailable');
+          error.code = 'EMBEDDING_PROVIDER_UNAVAILABLE';
+          throw error;
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expectedFallbackReason: 'embedding_unavailable',
+      configuredBackend: 'pgvector',
+    },
+    {
+      name: 'missing_chunk_embeddings',
+      provider: createRetrievalProvider({
+        preferredBackend: 'hybrid',
+        preferredSearchProvenance: 'postgresql_repository',
+        async preferredSearch() {
+          const error = new Error('document chunks do not have embeddings');
+          error.code = 'MISSING_CHUNK_EMBEDDINGS';
+          throw error;
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expectedFallbackReason: 'missing_chunk_embeddings',
+      configuredBackend: 'hybrid',
+    },
+    {
+      name: 'vector_unavailable',
+      provider: createRetrievalProvider({
+        preferredBackend: 'pgvector',
+        preferredSearchProvenance: 'postgresql_repository',
+        async preferredSearch() {
+          const error = new Error('pgvector operator unavailable at runtime');
+          error.code = 'PGVECTOR_RUNTIME_UNAVAILABLE';
+          throw error;
+        },
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expectedFallbackReason: 'vector_unavailable',
+      configuredBackend: 'pgvector',
+    },
+    {
+      name: 'preferred_backend_unavailable',
+      provider: createRetrievalProvider({
+        preferredBackend: 'hybrid',
+        async lexicalSearch() {
+          return [lexicalRow];
+        },
+      }),
+      expectedFallbackReason: 'preferred_backend_unavailable',
+      configuredBackend: 'hybrid',
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async () => {
+      const result = await currentCase.provider.retrieve(request);
+
+      assert.equal(result.configuredBackend, currentCase.configuredBackend, `${currentCase.name} must preserve the configured vector backend for diagnostics`);
+      assert.equal(result.effectiveBackend, 'lexical_fallback', `${currentCase.name} must report the effective backend that returned evidence`);
+      assert.equal(result.retrievalBackend, 'lexical_fallback', `${currentCase.name} must not claim pgvector or hybrid after fallback`);
+      assert.equal(result.backendFallbackReason, currentCase.expectedFallbackReason, `${currentCase.name} must surface the precise fallback reason`);
+      assert.equal(result.backendProvenance, 'lexical_fallback', `${currentCase.name} fallback must report lexical fallback provenance, never repository vector provenance`);
+      assert.equal(
+        result.retrievedChunks[0]?.retrievalMetadata?.backendFallbackReason,
+        currentCase.expectedFallbackReason,
+        `${currentCase.name} per-chunk metadata must carry the same fallback taxonomy as the top-level result`,
+      );
+    });
+  }
 });

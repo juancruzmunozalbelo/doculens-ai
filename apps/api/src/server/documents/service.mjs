@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { normalizeDocumentText } from '../ingestion/normalization.mjs';
 import { chunkDocument } from '../ingestion/chunking.mjs';
+import { enrichChunksWithEmbeddings, embeddingCoverageForChunks } from '../ingestion/embedding-enrichment.mjs';
 
 export class DocumentAccessError extends Error {
   constructor(message = 'Document not found', statusCode = 404) {
@@ -179,6 +180,8 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
 
   const normalize = ingestion.normalize ?? normalizeDocumentText;
   const chunk = ingestion.chunk ?? chunkDocument;
+  const embeddingProvider = ingestion.embeddingProvider ?? null;
+  const embedding = ingestion.embedding ?? {};
 
   function publicChunk(row) {
     const content = row.content ?? '';
@@ -190,6 +193,11 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
       chunkIndex: row.chunkIndex ?? row.chunk_index,
       tokenEstimate: row.tokenEstimate ?? row.token_estimate ?? 0,
       contentExcerpt: content.length > 240 ? `${content.slice(0, 237)}...` : content,
+      embeddingProvider: row.embeddingProvider ?? row.embedding_provider ?? null,
+      embeddingModel: row.embeddingModel ?? row.embedding_model ?? null,
+      embeddingDimensions: row.embeddingDimensions ?? row.embedding_dimensions ?? null,
+      embeddingStatus: row.embeddingStatus ?? row.embedding_status ?? null,
+      embeddingErrorCode: row.embeddingErrorCode ?? row.embedding_error_code ?? null,
       retrievalMetadata: row.retrievalMetadata ?? row.retrieval_metadata ?? {},
       createdAt: row.createdAt ?? row.created_at,
     };
@@ -218,10 +226,18 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
 
     try {
       const createdChunks = chunk({ documentId: created.id, content: normalizedContent });
+      const chunksForPersistence = await enrichChunksWithEmbeddings(createdChunks, {
+        embeddingProvider,
+        embedding,
+        retrieval: ingestion.retrieval,
+        retrievalBackend: ingestion.retrievalBackend,
+      });
+      const embeddingCoverage = embeddingCoverageForChunks(chunksForPersistence);
       await chunks.createManyForDocument({
         documentId: created.id,
         userId: user.id,
-        chunks: createdChunks,
+        chunks: chunksForPersistence,
+        embeddingCoverage,
       });
     } catch (error) {
       if (typeof chunks.deleteForDocument === 'function') {

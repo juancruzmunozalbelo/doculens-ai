@@ -1,5 +1,7 @@
 import {
+  BACKEND_PROVENANCE,
   DEFAULT_RELEVANCE_THRESHOLD,
+  FALLBACK_REASONS,
   LEXICAL_FALLBACK_BACKEND,
   SUPPORTED_PREFERRED_BACKENDS,
   boundedTopK,
@@ -21,13 +23,39 @@ function normalizePreferredBackend(preferredBackend = 'hybrid') {
   throw new Error('preferredBackend must be pgvector, hybrid, or lexical_fallback');
 }
 
-function metadataForBackend(backend, backendFallbackReason) {
-  return backendFallbackReason
-    ? { backend, backendFallbackReason }
-    : { backend };
+function metadataForBackend({
+  configuredBackend,
+  effectiveBackend,
+  backendProvenance,
+  backendFallbackReason,
+  componentScores,
+}) {
+  return {
+    backend: effectiveBackend,
+    configuredBackend,
+    effectiveBackend,
+    backendProvenance,
+    backendFallbackReason: backendFallbackReason ?? null,
+    ...(componentScores ? { componentScores } : {}),
+  };
 }
 
-function citationReadyChunk(row, { backend, backendFallbackReason }) {
+function componentScoresForRow(row) {
+  const vectorScore = row.vectorScore ?? row.vector_score;
+  const lexicalComponentScore = row.lexicalScore ?? row.lexical_score;
+  const headingMatchScore = row.headingMatchScore ?? row.heading_match_score;
+  const hybridScore = row.hybridScore ?? row.hybrid_score;
+  const components = {};
+  if (vectorScore !== undefined) components.vectorScore = normalizeScore(vectorScore);
+  if (lexicalComponentScore !== undefined) components.lexicalScore = normalizeScore(lexicalComponentScore);
+  if (headingMatchScore !== undefined) components.headingMatchScore = normalizeScore(headingMatchScore);
+  if (hybridScore !== undefined) components.hybridScore = normalizeScore(hybridScore);
+  return Object.keys(components).length > 0 ? components : null;
+}
+
+function citationReadyChunk(row, backendContext) {
+  const componentScores = componentScoresForRow(row);
+  const backendMetadata = metadataForBackend({ ...backendContext, componentScores });
   return {
     id: row.id,
     documentId: row.documentId ?? row.document_id,
@@ -39,7 +67,7 @@ function citationReadyChunk(row, { backend, backendFallbackReason }) {
     contentExcerpt: contentExcerptFor({ content: row.content, contentExcerpt: row.contentExcerpt ?? row.content_excerpt }),
     tokenEstimate: row.tokenEstimate ?? row.token_estimate ?? null,
     normalizedScore: normalizeScore(row.normalizedScore ?? row.normalized_score ?? row.score),
-    retrievalMetadata: metadataForBackend(backend, backendFallbackReason),
+    retrievalMetadata: { ...(row.retrievalMetadata ?? row.retrieval_metadata ?? {}), ...backendMetadata },
   };
 }
 
@@ -60,12 +88,31 @@ function rowBelongsToScope(row, { documentId, userId }) {
 }
 
 
-function rowsToResult({ rows, backend, backendFallbackReason, relevanceThreshold, documentId, userId, limit }) {
+function rowsToResult({
+  rows,
+  configuredBackend,
+  effectiveBackend,
+  backendProvenance,
+  backendFallbackReason,
+  relevanceThreshold,
+  documentId,
+  userId,
+  limit,
+}) {
   const scopedRows = rows.filter((row) => rowBelongsToScope(row, { documentId, userId })).slice(0, limit);
-  const retrievedChunks = scopedRows.map((row) => citationReadyChunk(row, { backend, backendFallbackReason }));
-  return {
-    retrievalBackend: backend,
+  const backendContext = {
+    configuredBackend,
+    effectiveBackend,
+    backendProvenance,
     backendFallbackReason,
+  };
+  const retrievedChunks = scopedRows.map((row) => citationReadyChunk(row, backendContext));
+  return {
+    retrievalBackend: effectiveBackend,
+    configuredBackend,
+    effectiveBackend,
+    backendProvenance,
+    backendFallbackReason: backendFallbackReason ?? null,
     retrievedChunks,
     scoreSummary: buildScoreSummary({ retrievedChunks, relevanceThreshold }),
   };
@@ -91,18 +138,55 @@ function lexicalSearchFromRepository(chunkRepository) {
   };
 }
 
-async function runPreferredSearch({ preferredSearch, documentId, userId, query, limit }) {
+function normalizePreferredSearchResult(rawResult, { configuredBackend, preferredSearchProvenance }) {
+  const rawRows = Array.isArray(rawResult)
+    ? rawResult
+    : (rawResult?.rows ?? rawResult?.chunks ?? rawResult?.retrievedChunks);
+  if (!Array.isArray(rawRows)) {
+    const error = new Error('preferred retrieval backend returned an invalid row set');
+    error.code = 'PREFERRED_BACKEND_UNAVAILABLE';
+    throw error;
+  }
+
+  const declaredProvenance = rawResult?.backendProvenance
+    ?? rawResult?.provenance
+    ?? rawResult?.retrievalMetadata?.backendProvenance
+    ?? preferredSearchProvenance
+    ?? (Array.isArray(rawResult) ? BACKEND_PROVENANCE.testOnlyPreferredSearch : null);
+  const backendProvenance = rawResult?.testOnly === true
+    ? BACKEND_PROVENANCE.testOnlyPreferredSearch
+    : declaredProvenance;
+  const effectiveBackend = rawResult?.effectiveBackend ?? rawResult?.retrievalBackend ?? configuredBackend;
+
+  if (effectiveBackend !== configuredBackend || backendProvenance !== BACKEND_PROVENANCE.postgresqlRepository) {
+    const error = new Error('preferred retrieval backend did not provide repository-backed vector provenance');
+    error.code = backendProvenance === BACKEND_PROVENANCE.testOnlyPreferredSearch
+      ? 'TEST_ONLY_PREFERRED_RETRIEVAL'
+      : 'PREFERRED_BACKEND_UNAVAILABLE';
+    throw error;
+  }
+
+  return {
+    rows: rawRows,
+    effectiveBackend,
+    backendProvenance,
+  };
+}
+
+async function runPreferredSearch({ preferredSearch, documentId, userId, query, limit, configuredBackend, preferredSearchProvenance }) {
   if (typeof preferredSearch !== 'function') {
     const error = new Error('preferred retrieval backend is unavailable');
     error.code = 'PREFERRED_RETRIEVAL_UNAVAILABLE';
     throw error;
   }
-  return await preferredSearch({ documentId, userId, query, limit });
+  const rawResult = await preferredSearch({ documentId, userId, query, limit });
+  return normalizePreferredSearchResult(rawResult, { configuredBackend, preferredSearchProvenance });
 }
 
 export function createRetrievalProvider({
   preferredBackend = 'hybrid',
   preferredSearch,
+  preferredSearchProvenance,
   lexicalSearch,
   chunkRepository,
   chunks,
@@ -124,8 +208,10 @@ export function createRetrievalProvider({
       const rows = await configuredLexicalSearch({ documentId, userId, query, limit: boundedLimit });
       return rowsToResult({
         rows: [...rows].sort(sortByScoreThenIndex),
-        backend: LEXICAL_FALLBACK_BACKEND,
-        backendFallbackReason: 'embedding_unavailable',
+        configuredBackend: configuredPreferredBackend,
+        effectiveBackend: LEXICAL_FALLBACK_BACKEND,
+        backendProvenance: BACKEND_PROVENANCE.lexicalFallback,
+        backendFallbackReason: FALLBACK_REASONS.retrievalDisabled,
         relevanceThreshold,
         documentId,
         userId,
@@ -134,10 +220,20 @@ export function createRetrievalProvider({
     }
 
     try {
-      const rows = await runPreferredSearch({ preferredSearch, documentId, userId, query, limit: boundedLimit });
+      const preferredResult = await runPreferredSearch({
+        preferredSearch,
+        documentId,
+        userId,
+        query,
+        limit: boundedLimit,
+        configuredBackend: configuredPreferredBackend,
+        preferredSearchProvenance,
+      });
       return rowsToResult({
-        rows,
-        backend: configuredPreferredBackend,
+        rows: preferredResult.rows,
+        configuredBackend: configuredPreferredBackend,
+        effectiveBackend: preferredResult.effectiveBackend,
+        backendProvenance: preferredResult.backendProvenance,
         backendFallbackReason: null,
         relevanceThreshold,
         documentId,
@@ -159,7 +255,9 @@ export function createRetrievalProvider({
       const rows = await configuredLexicalSearch({ documentId, userId, query, limit: boundedLimit });
       return rowsToResult({
         rows: [...rows].sort(sortByScoreThenIndex),
-        backend: LEXICAL_FALLBACK_BACKEND,
+        configuredBackend: configuredPreferredBackend,
+        effectiveBackend: LEXICAL_FALLBACK_BACKEND,
+        backendProvenance: BACKEND_PROVENANCE.lexicalFallback,
         backendFallbackReason,
         relevanceThreshold,
         documentId,

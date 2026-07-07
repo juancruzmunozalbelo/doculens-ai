@@ -1,6 +1,13 @@
+import {
+  EMBEDDING_CONTRACT,
+  normalizeEmbeddingConfig,
+} from '../embeddings/provider.mjs';
+
 const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimax.io/v1';
 const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3';
 const ALLOWED_PROVIDERS = new Set(['minimax']);
+const ALLOWED_RETRIEVAL_BACKENDS = new Set(['lexical_fallback', 'pgvector', 'hybrid']);
+const VECTOR_RETRIEVAL_BACKENDS = new Set(['pgvector', 'hybrid']);
 const WEAK_JWT_SECRETS = new Set([
   '',
   'secret',
@@ -28,6 +35,59 @@ function normalizeDatabaseUrl(value) {
     throw new Error('DATABASE_URL must be a PostgreSQL connection URL');
   }
   return value;
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return fallback;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  throw new Error('EMBEDDING_STRICT must be true or false');
+}
+
+function normalizePositiveIntegerEnv(env, key, fallback) {
+  const value = env[key];
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return fallback;
+  }
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    throw new Error(`${key} must be a positive integer`);
+  }
+  return numeric;
+}
+
+function normalizeRetrievalBackend(value) {
+  const backend = String(value || 'lexical_fallback').trim().toLowerCase();
+  if (!ALLOWED_RETRIEVAL_BACKENDS.has(backend)) {
+    throw new Error('RETRIEVAL_BACKEND must be one of: lexical_fallback, pgvector, hybrid');
+  }
+  return backend;
+}
+
+function buildRetrievalConfig(env) {
+  const configuredBackend = normalizeRetrievalBackend(env.RETRIEVAL_BACKEND);
+  const vectorEnabled = VECTOR_RETRIEVAL_BACKENDS.has(configuredBackend);
+  const embedding = normalizeEmbeddingConfig({
+    provider: env.EMBEDDING_PROVIDER || EMBEDDING_CONTRACT.provider,
+    model: env.EMBEDDING_MODEL || EMBEDDING_CONTRACT.model,
+    dimensions: normalizePositiveIntegerEnv(env, 'EMBEDDING_DIMENSIONS', EMBEDDING_CONTRACT.dimensions),
+    strict: normalizeBoolean(env.EMBEDDING_STRICT, false),
+  });
+
+  return Object.freeze({
+    configuredBackend,
+    effectiveBackend: configuredBackend === 'lexical_fallback' ? 'lexical_fallback' : 'lexical_fallback',
+    backendFallbackReason: configuredBackend === 'lexical_fallback' ? 'retrieval_disabled' : 'preferred_backend_unavailable',
+    vectorEnabled,
+    embedding,
+  });
 }
 
 function isExplicitWeakSecretTestMode(env) {
@@ -68,11 +128,15 @@ function buildServerConfig(env = process.env) {
     throw new Error(`MINIMAX_MODEL must be ${DEFAULT_MINIMAX_MODEL} for the assessment contract`);
   }
 
+  const retrieval = buildRetrievalConfig(env);
+
   return Object.freeze({
     nodeEnv: env.NODE_ENV || 'development',
     databaseUrl,
     jwtSecret,
     aiProvider,
+    retrievalBackend: retrieval.configuredBackend,
+    retrieval,
     minimax: Object.freeze({
       apiKey: minimaxApiKey,
       baseUrl: minimaxBaseUrl,

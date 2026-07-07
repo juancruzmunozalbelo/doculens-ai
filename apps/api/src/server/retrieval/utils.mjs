@@ -2,6 +2,21 @@ export const DEFAULT_RELEVANCE_THRESHOLD = 0.55;
 export const DEFAULT_TOP_K = 4;
 export const LEXICAL_FALLBACK_BACKEND = 'lexical_fallback';
 export const SUPPORTED_PREFERRED_BACKENDS = new Set(['pgvector', 'hybrid']);
+export const BACKEND_PROVENANCE = Object.freeze({
+  lexicalFallback: 'lexical_fallback',
+  postgresqlRepository: 'postgresql_repository',
+  testOnlyPreferredSearch: 'test_only_preferred_search',
+  unavailable: 'unavailable',
+});
+
+export const FALLBACK_REASONS = Object.freeze({
+  retrievalDisabled: 'retrieval_disabled',
+  embeddingUnavailable: 'embedding_unavailable',
+  missingChunkEmbeddings: 'missing_chunk_embeddings',
+  vectorUnavailable: 'vector_unavailable',
+  preferredBackendUnavailable: 'preferred_backend_unavailable',
+});
+
 
 const MAX_EXCERPT_LENGTH = 240;
 
@@ -79,15 +94,22 @@ export function buildScoreSummary({ retrievedChunks = [], relevanceThreshold = D
 export function retrievalUnavailableReason(error) {
   const code = typeof error?.code === 'string' ? error.code.toUpperCase() : '';
   const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+  const combined = `${code} ${message}`;
 
-  if (code.includes('EMBEDDING') || message.includes('embedding')) {
-    return 'embedding_unavailable';
+  if (/RETRIEVAL[_\s-]?DISABLED|LEXICAL[_\s-]?ONLY/i.test(combined)) {
+    return FALLBACK_REASONS.retrievalDisabled;
   }
-  if (code.includes('PGVECTOR') || code.includes('VECTOR') || message.includes('pgvector') || message.includes('vector')) {
-    return 'vector_unavailable';
+  if (/MISSING[_\s-]?CHUNK[_\s-]?EMBEDDINGS|CHUNK[_\s-]?EMBEDDINGS[_\s-]?MISSING|NO[_\s-]?CHUNK[_\s-]?EMBEDDINGS|STALE[_\s-]?EMBEDDINGS/i.test(combined)) {
+    return FALLBACK_REASONS.missingChunkEmbeddings;
   }
-  if (code.includes('PREFERRED_RETRIEVAL') || message.includes('preferred retrieval')) {
-    return 'preferred_backend_unavailable';
+  if (/EMBEDDING/i.test(combined)) {
+    return FALLBACK_REASONS.embeddingUnavailable;
+  }
+  if (/PREFERRED[_\s-]?RETRIEVAL|PREFERRED[_\s-]?BACKEND|TEST[_\s-]?ONLY[_\s-]?PREFERRED|FAKE[_\s-]?PREFERRED/i.test(combined)) {
+    return FALLBACK_REASONS.preferredBackendUnavailable;
+  }
+  if (/PGVECTOR|VECTOR/i.test(combined)) {
+    return FALLBACK_REASONS.vectorUnavailable;
   }
   return null;
 }
