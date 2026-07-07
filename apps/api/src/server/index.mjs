@@ -29,7 +29,7 @@ import { createStructuredLogger, normalizeRequestId, safeLogger } from './loggin
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_SERVER_MINIMAX_BUDGET = Object.freeze({
   maxLiveCalls: 32,
-  maxOutputTokens: 800,
+  maxOutputTokens: 6_000,
   maxInputTokens: 8_000,
   maxContextTokens: 8_000,
   maxRetries: 1,

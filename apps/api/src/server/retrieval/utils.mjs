@@ -2,6 +2,29 @@ export const DEFAULT_RELEVANCE_THRESHOLD = 0.55;
 export const DEFAULT_TOP_K = 4;
 export const LEXICAL_FALLBACK_BACKEND = 'lexical_fallback';
 export const SUPPORTED_PREFERRED_BACKENDS = new Set(['pgvector', 'hybrid']);
+const LEXICAL_STOPWORDS = new Set([
+  'what',
+  'which',
+  'where',
+  'when',
+  'does',
+  'this',
+  'that',
+  'the',
+  'and',
+  'for',
+  'from',
+  'with',
+  'list',
+  'show',
+  'tell',
+  'about',
+  'source',
+  'document',
+  'file',
+  'pdf',
+]);
+
 
 const MAX_EXCERPT_LENGTH = 240;
 
@@ -97,7 +120,7 @@ export function lexicalTerms(text) {
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/\s+/)
-    .filter((term) => term.length > 2);
+    .filter((term) => term.length > 2 && !LEXICAL_STOPWORDS.has(term));
 }
 
 export function lexicalScore(query, chunk) {

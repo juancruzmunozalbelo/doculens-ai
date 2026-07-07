@@ -1,0 +1,34 @@
+{
+  "description": "Sanitized representative MiniMax chat wrapper with a fenced JSON answer that must become reviewer-facing prose.",
+  "expectedAnswer": {
+    "text": "The requested deliverables are a Git repository with runnable local setup instructions and a README that explains architecture, AI design, data flow, privacy decisions, reliability strategy, deployment approach, and trade-offs.",
+    "citations": [
+      {
+        "chunkId": "assessment-deliverables",
+        "quote": "The candidate must deliver a Git repository with runnable local setup instructions and a README."
+      }
+    ],
+    "uncertainty": "low"
+  },
+  "providerResponse": {
+    "model": "MiniMax-M3",
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "```json\n{\"answer\":{\"text\":\"The requested deliverables are a Git repository with runnable local setup instructions and a README that explains architecture, AI design, data flow, privacy decisions, reliability strategy, deployment approach, and trade-offs.\",\"citations\":[{\"chunkId\":\"assessment-deliverables\",\"quote\":\"The candidate must deliver a Git repository with runnable local setup instructions and a README.\"}],\"uncertainty\":\"low\",\"metadata\":{\"provider\":\"minimax\",\"model\":\"MiniMax-M3\"}}}\n```"
+            }
+          ]
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 408,
+      "completion_tokens": 96,
+      "total_tokens": 504
+    }
+  }
+}

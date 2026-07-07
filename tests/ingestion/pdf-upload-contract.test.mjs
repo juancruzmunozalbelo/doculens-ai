@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const assessmentPdfBytes = readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/full-stack-ai-engineer-assessment.pdf'));
+const assessmentFixtureText = readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/full-stack-ai-engineer-assessment.txt'), 'utf8');
+const assessmentGoldenAssertions = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/golden-assertions.json'), 'utf8'));
 const owner = Object.freeze({ id: '11111111-1111-4111-8111-111111111111', email: 'owner@example.com' });
 
 async function importRequired(relativePath, exportNames, purpose) {
@@ -94,7 +98,7 @@ async function close(server) {
   });
 }
 
-async function createPdfUploadHarness(t, { pdfConverter, pdfUploadLimits, tempRoot } = {}) {
+async function createPdfUploadHarness(t, { pdfConverter, pdfUploadLimits, tempRoot, aiProvider, retrievalProvider, analysisRepository, chatRepository } = {}) {
   const { createDocuLensServer } = await importRequired(
     'apps/api/src/server/index.mjs',
     ['createDocuLensServer'],
@@ -117,6 +121,11 @@ async function createPdfUploadHarness(t, { pdfConverter, pdfUploadLimits, tempRo
   const server = createDocuLensServer(testConfig(), {
     auth: createAuthFake(),
     documents,
+    chunksRepository,
+    aiProvider,
+    retrievalProvider,
+    analysisRepository,
+    chatRepository,
     pdfConverter,
     pdfUploadLimits,
     tempRoot,
@@ -358,6 +367,176 @@ test('authenticated PDF upload converts text-based PDFs through document ingesti
   assert.equal(persisted.title, 'Renamed PDF Source');
   assert.deepEqual(persisted.metadata, response.body.document.metadata, 'safe PDF metadata must survive repository persistence');
   await assertNoTempFiles(tempRoot);
+});
+
+test('real assessment PDF endpoint regression covers upload, chunks, analysis, and representative chat semantics', async (t) => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'doculens-pdf-assessment-regression-'));
+  const analysisFixture = {
+    summary: 'The Full Stack AI Engineer Assessment asks the candidate to build an AI-powered full-stack document review app with backend APIs, retrieval-grounded AI, React UX, reliability evidence, deployment thinking, and clear deliverables.',
+    sections: [
+      { title: 'Backend requirements', summary: 'REST API, authentication, analysis, chat, source retrieval, persistence, and ownership checks are required.' },
+      { title: 'Frontend requirements', summary: 'React source intake, review briefing, chat input, answer cards, evidence inspection, loading states, and error states are required.' },
+      { title: 'Deliverables', summary: 'A runnable Git repository and README must explain setup, architecture, AI design, privacy, reliability, deployment, and trade-offs.' },
+    ],
+    entities: [{ name: 'Full Stack AI Engineer Assessment', type: 'assessment' }],
+    requirements: [
+      { category: 'Backend', text: 'Provide REST API endpoints, an LLM provider boundary, persistence, JWT authentication, and ownership checks.' },
+      { category: 'Frontend', text: 'Implement React source intake, review briefing, chat input, answer cards, inspectable evidence, loading states, and error states.' },
+      { category: 'Deployment', text: 'Describe or provision AWS infrastructure and separate configuration and secrets from code.' },
+    ],
+    obligations: [],
+    deliverables: [{ text: 'Deliver a Git repository with runnable local setup instructions and a README covering architecture, AI design, data flow, privacy, reliability, deployment, and trade-offs.' }],
+    risks: [{ severity: 'medium', text: 'Reliability, privacy-safe logging, conversion failures, retrieval misses, provider failures, and network failures need targeted tests and safe recovery.' }],
+    uncertainties: ['The assessment does not mandate a single database or AWS topology.'],
+    recommendedQuestions: [
+      'What are the main requirements in this source?',
+      'What deliverables does this source request?',
+      'What frontend UX requirements should be implemented?',
+    ],
+    metadata: { provider: 'minimax', model: 'MiniMax-M3', promptId: 'doculens.analysis', promptVersion: '2026-07-07.1', contextStrategy: 'full_document' },
+  };
+  const chatCalls = [];
+  const answerForQuestion = (payload) => {
+    chatCalls.push(payload);
+    const lowerQuestion = payload.question.toLowerCase();
+    const retrievedChunk = payload.chunks?.[0];
+    const chunkId = retrievedChunk?.chunkId;
+    const quote = String(retrievedChunk?.contentExcerpt ?? retrievedChunk?.content ?? '').slice(0, 160);
+    const citation = chunkId && quote ? [{ chunkId, quote }] : [];
+    const metadata = {
+      provider: 'minimax',
+      model: 'MiniMax-M3',
+      promptId: payload.prompt.id,
+      promptVersion: payload.prompt.version,
+      contextStrategy: payload.contextStrategy,
+    };
+    if (lowerQuestion.includes('backend')) {
+      return {
+        text: 'The backend requirements include REST API endpoints for authentication, document creation, analysis, chat, source retrieval, persistence, JWT authentication, ownership checks, and an LLM provider boundary.',
+        citations: citation,
+        uncertainty: 'low',
+        metadata,
+      };
+    }
+    if (lowerQuestion.includes('frontend')) {
+      return {
+        text: 'The frontend must use React and provide source intake, review briefing, starter questions, chat input, answer cards, inspectable evidence, loading states, empty states, error states, and retry or refine actions.',
+        citations: citation,
+        uncertainty: 'low',
+        metadata,
+      };
+    }
+    if (lowerQuestion.includes('deliverables')) {
+      return {
+        text: 'The deliverables are a Git repository with runnable local setup instructions and a README explaining architecture, AI design, data flow, privacy decisions, reliability strategy, deployment approach, and trade-offs.',
+        citations: citation,
+        uncertainty: 'low',
+        metadata,
+      };
+    }
+    if (lowerQuestion.includes('requirements')) {
+      return {
+        text: 'The main requirements cover REST APIs, an LLM provider boundary, retrieval-grounded chat, React reviewer UX, privacy-safe logging, targeted reliability tests, and AWS deployment thinking.',
+        citations: citation,
+        uncertainty: 'medium',
+        metadata,
+      };
+    }
+    return {
+      text: 'The assessment is about building an AI-powered full-stack document review application with backend, frontend, retrieval, privacy, reliability, deployment, and deliverable expectations.',
+      citations: [],
+      uncertainty: 'medium',
+      metadata,
+    };
+  };
+  const { baseUrl } = await createPdfUploadHarness(t, {
+    tempRoot,
+    pdfConverter: async () => ({ text: assessmentFixtureText, pageCount: 3 }),
+    aiProvider: {
+      async analyzeDocument() {
+        return analysisFixture;
+      },
+      async answerQuestion(payload) {
+        return answerForQuestion(payload);
+      },
+    },
+  });
+
+  const upload = await postPdf(baseUrl, {
+    title: 'Full Stack AI Engineer Assessment',
+    filename: 'full-stack-ai-engineer-assessment.pdf',
+    bytes: assessmentPdfBytes,
+  });
+
+  assert.equal(upload.status, 201, 'assessment PDF upload must create a ready document');
+  assert.equal(upload.body.document.sourceType, 'pdf');
+  assert.equal(upload.body.document.status, 'ready');
+  assert.equal(upload.body.document.metadata.safeOriginalBasename, 'full-stack-ai-engineer-assessment.pdf');
+  assert.equal(upload.body.document.metadata.mimeType, 'application/pdf');
+  assert.equal(upload.body.document.metadata.sizeBytes, assessmentPdfBytes.length);
+  for (const marker of ['Full Stack AI Engineer Assessment', 'Backend requirements', 'Frontend requirements', 'Deliverables']) {
+    assert.match(upload.body.document.content, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `uploaded assessment content must include ${marker}`);
+  }
+
+  const documentId = upload.body.document.id;
+  const chunks = await requestJson(baseUrl, `/api/documents/${documentId}/chunks`);
+  assert.equal(chunks.status, 200, 'uploaded assessment chunks must be readable through the endpoint');
+  assert.ok(chunks.body.chunks.length >= 8, 'assessment upload must produce enough chunks for retrieval-backed chat');
+  assert.equal(
+    chunks.body.chunks.every((chunk) => JSON.stringify(chunk.headingPath) === JSON.stringify(['Untitled'])),
+    false,
+    'assessment upload chunks must expose useful section headings instead of all-Untitled metadata',
+  );
+  assert.match(
+    chunks.body.chunks.map((chunk) => `${chunk.headingPath.join(' ')} ${chunk.contentExcerpt}`).join('\n'),
+    /Backend requirements|Frontend requirements|Deliverables/i,
+    'chunk endpoint must expose section metadata and excerpts suitable for retrieval',
+  );
+
+  const analysis = await requestJson(baseUrl, `/api/documents/${documentId}/analysis`, { method: 'POST' });
+  assert.equal(analysis.status, 201, 'assessment analysis endpoint must create a structured briefing');
+  assert.match(analysis.body.analysis.summary, /AI-powered full-stack document review app/i);
+  assert.ok(analysis.body.analysis.requirements.length >= 2, 'assessment analysis must include requirements rather than fallback-only copy');
+  assert.ok(analysis.body.analysis.deliverables.length >= 1, 'assessment analysis must include deliverables rather than fallback-only copy');
+  assert.doesNotMatch(JSON.stringify(analysis.body.analysis), /could not convert|```|\[object Object\]|rawProvider|responseId|MINIMAX_API_KEY|\/Users\//i, 'analysis display fields must remain safe and structured');
+
+  const supportedQuestions = [
+    { name: 'overview', question: 'What is this document about?', mustMention: ['AI-powered full-stack', 'backend', 'frontend'] },
+    { name: 'main requirements', question: 'What are the main requirements in this source?', mustMention: ['REST APIs', 'LLM provider', 'React'] },
+    { name: 'backend', question: assessmentGoldenAssertions.chatGoldenQuestions.backend.question, mustMention: ['REST API', 'JWT', 'ownership'] },
+    { name: 'frontend', question: assessmentGoldenAssertions.chatGoldenQuestions.frontend.question, mustMention: ['React', 'answer cards', 'loading'] },
+    { name: 'deliverables', question: 'What deliverables does this source request?', mustMention: ['Git repository', 'README', 'deployment'] },
+  ];
+  for (const currentQuestion of supportedQuestions) {
+    const chat = await requestJson(baseUrl, `/api/documents/${documentId}/chat`, {
+      method: 'POST',
+      body: { question: currentQuestion.question },
+    });
+    assert.equal(chat.status, 201, `${currentQuestion.name} chat question must create an answer`);
+    assert.notEqual(chat.body.answer.displayState.kind, 'insufficient_evidence', `${currentQuestion.name} must not degrade to insufficient evidence`);
+    assert.ok(['grounded', 'full_document_overview'].includes(chat.body.answer.displayState.kind), `${currentQuestion.name} must be grounded or a source-wide overview`);
+    for (const term of currentQuestion.mustMention) {
+      assert.match(chat.body.answer.text, new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${currentQuestion.name} answer must mention ${term}`);
+    }
+    assert.doesNotMatch(JSON.stringify({
+      text: chat.body.answer.text,
+      displayText: chat.body.answer.displayText,
+      displayState: chat.body.answer.displayState,
+    }), /```|\[object Object\]|rawProvider|responseId|MINIMAX_API_KEY|\/Users\//i, `${currentQuestion.name} answer display fields must not leak unsafe provider or internal output`);
+  }
+
+  const unsupported = await requestJson(baseUrl, `/api/documents/${documentId}/chat`, {
+    method: 'POST',
+    body: { question: 'What is the latest stock price of the company today?' },
+  });
+  assert.equal(unsupported.status, 200, 'outside-source assessment question must be handled without model fabrication');
+  assert.equal(unsupported.body.answer.displayState.kind, 'unsupported');
+  assert.deepEqual(unsupported.body.answer.citations, [], 'unsupported assessment answer must not fabricate citations');
+  assert.equal(
+    chatCalls.some((call) => /latest stock price/i.test(call.question)),
+    false,
+    'outside-source assessment question must not invoke the AI provider',
+  );
 });
 
 test('PDF upload sanitizes hostile original basenames before title fallback and metadata persistence', async (t) => {

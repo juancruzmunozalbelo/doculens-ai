@@ -78,8 +78,8 @@
       "retrievedChunkIds",
       "chunk_",
       "00000000-0000-0000-0000-000000000000",
-      "MINIMAX_API_KEY=",
-      "AWS_SECRET_ACCESS_KEY=",
+      "MINIMAX_API_KEY",
+      "AWS_SECRET_ACCESS_KEY",
       "/Users/",
       "Traceback"
     ],
