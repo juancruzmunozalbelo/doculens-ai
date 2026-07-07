@@ -185,6 +185,46 @@ npm run verify               # Guardrail + foundation verification
 npm run guard:tdd            # Staged TDD guardrail
 ```
 
+## CI/CD quality gates
+
+Required pull-request checks for `main` are fast, merge-blocking jobs in `.github/workflows/ci.yml` plus the TDD companion workflow. Manual and scheduled gates are deliberately separate so required CI never implies slower E2E/eval/Docker/MarkItDown/mutation coverage ran when it did not.
+
+Gate categories:
+
+- Required: run on pull requests to `main` and on pushes where configured; the `main` branch ruleset must require the exact check names below before merge.
+- Manual: `workflow_dispatch` extended quality suites and mutation testing for reviewer/operator-requested proof.
+- Scheduled: weekly extended quality suites in `.github/workflows/extended-quality.yml`; failures are visible workflow failures but are not substitutes for current required PR checks.
+
+| Required check name | Command or validation |
+| --- | --- |
+| `CI / Build` | `npm ci`, then `npm run build` |
+| `CI / Unit Contracts` | `npm ci`, then `npm run test:unit` |
+| `CI / Verification Contracts` | `npm ci`, then `npm run verify` |
+| `CI / Integration Contracts` | `npm ci`, then `npm run test:integration`; live PostgreSQL checks remain explicit `SKIP` output unless `DOCULENS_TEST_DATABASE_URL` is configured |
+| `CI / AWS Static Validation` | pinned Terraform, `terraform -chdir=infra/aws fmt -check`, `terraform -chdir=infra/aws init -backend=false`, `terraform -chdir=infra/aws validate`, then `npm run test:aws` |
+| `CI / AWS Container Build Smoke` | `docker build -f Dockerfile.aws` without push and runtime packaging smoke |
+| `TDD Guardrails / TDD Guardrails` | TDD companion guardrails for pull requests and pushes |
+
+Repository branch protection or rulesets for `main` must be applied outside this repository and verified before the pipeline is considered enforced:
+
+- Required checks: exactly `CI / Build`, `CI / Unit Contracts`, `CI / Verification Contracts`, `CI / Integration Contracts`, `CI / AWS Static Validation`, `CI / AWS Container Build Smoke`, and `TDD Guardrails / TDD Guardrails`.
+- Stale or missing checks: enable the setting that requires current/up-to-date status checks before merge; a PR must not merge with missing results or checks from an older commit.
+- Administrator policy: include administrators in enforcement, or retain a repository-owner emergency-bypass record that names the bypass approver and reason.
+- Evidence: retain a screenshot/export of the `main` ruleset showing required check names, stale-check behavior, and administrator enforcement/bypass policy.
+
+Extended quality gates are intentionally separate from required CI:
+
+| Workflow | Trigger | Coverage |
+| --- | --- | --- |
+| `Extended Quality / Playwright E2E` | manual `workflow_dispatch` suite `e2e`/`all` or weekly schedule | installs Chromium prerequisites and runs `npm run test:e2e` |
+| `Extended Quality / Eval Regressions` | manual suite `eval`/`all` or weekly schedule | `npm run test:eval` |
+| `Extended Quality / Docker Compose Contracts` | manual suite `docker`/`all` or weekly schedule | `npm run test:docker` |
+| `Extended Quality / MarkItDown Smoke` | manual suite `markitdown`/`all` or weekly schedule | `npm run smoke:markitdown` |
+| `Mutation Testing / Mutation Testing` | manual `workflow_dispatch` only | bounded smoke/unit/integration/E2E mutation modes with report upload |
+
+Every validation or release workflow that installs Node dependencies uses `npm ci`.
+
+
 ## RAG, fallback, and unsupported behavior
 
 Normal chat is RAG-first:
@@ -323,40 +363,40 @@ It models:
 
 - public ALB with `/health` target group check
 - one ECS Fargate service and task definition
-- explicit `image_uri` contract for the app image
+- immutable `image_uri` contract for the app image digest released by GitHub Actions
 - RDS PostgreSQL with `publicly_accessible = false`
 - database security group ingress on 5432 only from the app security group
 - Secrets Manager containers or external ARNs for `DATABASE_URL`, `JWT_SECRET`, and `MINIMAX_API_KEY`
 - CloudWatch app log group
 - IAM task execution role and secret-read policy
 - bounded defaults: desired count 1, CPU 512, memory 1024 MiB, RDS 20 GiB, micro instance, single-AZ, no NAT gateway, deletion protection false, skip final snapshot true
+- partial S3 remote backend configuration supplied by GitHub environment variables with DynamoDB locking
 
-Validation:
+Local static validation:
 
 ```bash
 terraform -chdir=infra/aws fmt -check
 terraform -chdir=infra/aws init -backend=false
 terraform -chdir=infra/aws validate
-terraform -chdir=infra/aws plan -var image_uri=<pushed-image-uri>
+terraform -chdir=infra/aws plan -var image_uri=<pushed-image-digest>
 ```
 
-Observed final verification using configured AWS demo credentials and a placeholder public image URI for plan-shape validation:
+GitHub Actions release/deploy:
 
-```txt
-terraform -chdir=infra/aws fmt -check
-terraform: ok
+1. `AWS Release Deploy Demo / AWS Image Release` assumes `AWS_DEMO_DEPLOY_ROLE_ARN` through GitHub OIDC in the protected `aws-demo` environment.
+2. It builds `Dockerfile.aws`, tags the image with `GITHUB_SHA`, adds OCI label `org.opencontainers.image.revision=$GITHUB_SHA`, pushes to `AWS_DEMO_ECR_REPOSITORY`, and captures the immutable digest.
+3. `AWS Release Deploy Demo / AWS Terraform Plan` initializes the configured S3/DynamoDB remote backend, checks Terraform format/validate, verifies external secret ARNs with `secretsmanager:GetSecretValue` without printing payloads, and uploads the binary plan plus redacted summary.
+4. `AWS Release Deploy Demo / AWS Terraform Apply` is gated by `aws-demo` environment approval and applies the exact reviewed `doculens-demo.tfplan`.
+5. The deploy fails unless the ALB `/health` endpoint returns success after apply.
 
-terraform -chdir=infra/aws validate
-Success! The configuration is valid.
+Break-glass digest deploys are isolated behind `break_glass_image_digest`; the workflow rejects mutable tags and validates the digest belongs to the configured ECR repository with source-revision evidence for the reviewed commit.
 
-terraform -chdir=infra/aws plan -var image_uri=public.ecr.aws/docker/library/node:22-alpine
-Plan: 25 to add, 0 to change, 0 to destroy.
-Outputs: alb_url, app_url, database_endpoint, health_url, secret_arns (sensitive)
-```
+Required `aws-demo` environment configuration is recorded in `infra/aws/README.md`: account id, region, ECR repository, backend bucket/table/key, deploy role ARN, rollback role ARN, external populated secret ARNs, required reviewers, allowed branches, OIDC trust constraints, least-privilege role split, rollback, and cleanup.
 
-No `terraform apply` was run during final verification. Apply requires a pushed DocuLens app image and externally populated secrets. See `infra/aws/README.md` for plan review, optional apply, ALB health smoke, destroy, cleanup verification, estimated cost, and production gaps.
+No `terraform apply` was run during this repository update. Apply requires the protected GitHub environment, a valid AWS demo account, remote backend bootstrap resources, deploy/rollback OIDC roles, a pushed DocuLens app image digest, and externally populated secrets. See `infra/aws/README.md` for plan review, optional apply, ALB health smoke, destroy, cleanup verification, estimated cost, and production gaps.
 
-Production gaps are intentional and explicit: HTTPS/TLS, private subnet/NAT or VPC endpoints, database backup retention, final snapshots, WAF, rate limits, remote state, secret rotation, multi-AZ RDS, autoscaling, image scanning, least-privilege hardening beyond the demo, custom domains, and full observability.
+Production gaps are intentional and explicit: HTTPS/TLS, private subnet/NAT or VPC endpoints, database backup retention, final snapshots, WAF, rate limits, secret rotation, multi-AZ RDS, autoscaling, image scanning, least-privilege hardening beyond the demo, custom domains, and full observability.
+
 
 ## Optional AWS Lambda MarkItDown extension
 
@@ -391,31 +431,39 @@ AWS:
 
 ## Verification evidence
 
-Final local verification commands run:
+Current change verification in the isolated worktree `~/WorkanaChallenger-complete-ci-aws-deploy-pipeline`:
 
 ```txt
 npm ci                                                PASS
-POSTGRES_PASSWORD=local-postgres POSTGRES_PORT=55433 docker-compose up -d db   PASS
-npm run db:reset                                     PASS
-npm run demo:seed                                    PASS
-psql seed counts                                     users=2 documents=1 chunks=2 adversarial_chunks=1
-npm run test:unit                                    PASS: 55 passed
-npm run test:integration                             PASS: 23 passed
-npm run test:e2e                                     PASS: 2 passed
-npm run test:eval                                    PASS: 6 passed
-npm run smoke:markitdown                             PASS
-npm run test:aws                                     PASS: 5 passed
-npm run test:docker                                  PASS: 2 passed
 npm run build                                        PASS
-docker build -f Dockerfile.aws -t doculens-ai:aws-demo .  PASS
+npm run test:unit                                    PASS: 57 passed
+npm run verify                                       PASS: guardrail + foundation contracts passed
+npm run test:integration                             PASS: 23 passed, 1 skipped live PostgreSQL check
+npm run test:aws                                     PASS: 6 passed
+node --test tests/actions/workflows-contract.test.mjs PASS: 6 passed
 terraform -chdir=infra/aws fmt -check                PASS
+terraform -chdir=infra/aws init -backend=false       PASS
 terraform -chdir=infra/aws validate                  PASS
-terraform plan with AWS demo credentials             PASS: 25 to add, 0 to change, 0 to destroy
-openspec validate --changes build-doculens-ai-assessment PASS
-node --test scripts/guardrails/check-tdd.test.mjs    PASS: 8 passed
+docker build -f Dockerfile.aws -t doculens-ai:ci-smoke . PASS
+docker run --rm --entrypoint node doculens-ai:ci-smoke ... runtime packaging smoke PASS
+docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest .github/workflows/*.yml PASS
 ```
 
+AWS-only verification that cannot be run locally from this workstation must be collected by the repository/AWS operator before claiming the AWS demo pipeline is enabled:
+
+- GitHub `main` branch ruleset evidence: exact required checks `CI / Build`, `CI / Unit Contracts`, `CI / Verification Contracts`, `CI / Integration Contracts`, `CI / AWS Static Validation`, `CI / AWS Container Build Smoke`, and `TDD Guardrails / TDD Guardrails`; stale required checks block merge; administrators included or bypass documented.
+- GitHub `aws-demo` environment evidence: required reviewers configured, allowed deployment branches restricted to `main` unless explicitly approved, and administrator bypass policy recorded.
+- Canonical GitHub environment variables: `AWS_DEMO_ACCOUNT_ID`, `AWS_REGION`, `AWS_DEMO_ECR_REPOSITORY`, `AWS_DEMO_TF_STATE_BUCKET`, `AWS_DEMO_TF_LOCK_TABLE`, `AWS_DEMO_TF_STATE_KEY`, `AWS_DEMO_DEPLOY_ROLE_ARN`, `AWS_DEMO_ROLLBACK_ROLE_ARN`, `AWS_DEMO_DATABASE_URL_SECRET_ARN`, `AWS_DEMO_JWT_SECRET_ARN`, `AWS_DEMO_MINIMAX_API_KEY_SECRET_ARN`, `AWS_DEMO_DESIRED_COUNT`, `AWS_DEMO_DB_INSTANCE_CLASS`, and `AWS_DEMO_DB_ALLOCATED_STORAGE` are populated in the protected `aws-demo` environment without committing real values.
+- AWS OIDC evidence: deploy and rollback role trust policies bind `token.actions.githubusercontent.com:aud` to `sts.amazonaws.com` and `sub` to this repository plus approved refs or protected `aws-demo` environment subjects.
+- AWS role evidence: deploy and rollback roles are separate least-privilege roles; rollback has no image push or Terraform apply privileges.
+- AWS backend evidence: S3 state bucket and DynamoDB lock table exist, bucket encryption/versioning and DynamoDB `LockID` locking are enabled, and names match GitHub environment variables.
+- AWS secret readiness evidence: `DATABASE_URL`, `JWT_SECRET`, and `MINIMAX_API_KEY` Secrets Manager ARNs have non-empty `AWSCURRENT` values; logs show presence/status only and payloads are not printed.
+- AWS deploy evidence: the default path built and pushed `Dockerfile.aws` for the reviewed `GITHUB_SHA`, release image digest belongs to the configured ECR repository, source-revision label equals the reviewed commit SHA, the protected apply used the uploaded binary plan artifact, and ALB `/health` passed.
+- AWS rollback evidence: rollback input was an ECS task definition ARN or `family:revision`, raw image URI/digest inputs were rejected, ECS service stability completed, running count equaled desired count, and ALB `/health` passed.
+- AWS cleanup evidence: destroy uses the same remote state and account guard; ALB, ECS, RDS, CloudWatch log group, Secrets Manager containers, and local/CI plan artifacts are deleted or intentionally retained.
+
 Live MiniMax verification was not run because no real `MINIMAX_API_KEY` was available in the environment. Run the gated commands in the MiniMax section with a real key before claiming live provider proof.
+
 
 ## Repository safety
 
@@ -438,7 +486,7 @@ test-results/
 local harness folders
 ```
 
-GitHub branch protection requires the `guardrails` check on `main`.
+GitHub branch protection for `main` must require `CI / Build`, `CI / Unit Contracts`, `CI / Verification Contracts`, `CI / Integration Contracts`, `CI / AWS Static Validation`, `CI / AWS Container Build Smoke`, and `TDD Guardrails / TDD Guardrails` with stale checks blocking merges and administrator enforcement documented.
 
 ## OpenSpec
 

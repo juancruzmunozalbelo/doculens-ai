@@ -209,6 +209,7 @@ test('Terraform files under infra/aws model the tiny ECS ALB RDS Secrets Manager
   assert.ok(model.files.some((file) => /provider|versions/.test(path.basename(file)) && file.endsWith('.tf')), 'infra/aws must include Terraform provider/version configuration');
   assert.ok(model.files.some((file) => /variables/.test(path.basename(file)) && file.endsWith('.tf')), 'infra/aws must include variables.tf');
   assert.ok(model.files.some((file) => /outputs/.test(path.basename(file)) && file.endsWith('.tf')), 'infra/aws must include outputs.tf');
+  assert.match(model.hcl, /\bbackend\s+"s3"\s*\{\s*\}/, 'Terraform must declare a partial S3 backend for GitHub Actions remote state locking');
 
   assert.equal(
     model.resources.includes('aws_ecr_repository.app') || model.variables.includes('image_uri'),
