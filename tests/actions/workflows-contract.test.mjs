@@ -169,6 +169,7 @@ test('AWS deploy workflow releases immutable images and applies reviewed remote-
   assertContains(deploy, /actions\/upload-artifact@v4[\s\S]*doculens-demo\.tfplan[\s\S]*doculens-demo-plan\.txt/i, 'deploy must preserve binary plan and redacted summary for review');
   assertContains(deploy, /secretsmanager\s+get-secret-value[\s\S]*DATABASE_URL_SECRET_ARN[\s\S]*JWT_SECRET_ARN[\s\S]*MINIMAX_API_KEY_SECRET_ARN/i, 'deploy must verify required external secrets without printing payloads');
   assertContains(deploy, /desired[_-]?count|db_instance_class|db\.t4g\.micro|allocated_storage/i, 'AWS deploy must pin or validate tiny demo capacity before applying');
+  assertContains(deploy, /aws\s+ecs\s+wait\s+services-stable[\s\S]*--cluster\s+doculens-demo[\s\S]*--services\s+doculens-demo/i, 'deploy must wait for ECS service stability before health smoke can pass');
   assertContains(deploy, /curl\s+-fsS\s+"\$HEALTH_URL"/i, 'deploy must run ALB /health smoke after apply');
   assertContains(deploy, /timeout-minutes:\s*(?:[1-9]|[1-2][0-9]|30)\b/i, 'AWS deploy jobs must have a small timeout to bound demo spend');
 });

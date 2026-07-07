@@ -327,6 +327,8 @@ jobs:
             -backend-config="encrypt=true"
       - name: Terraform apply exact reviewed plan
         run: terraform -chdir=infra/aws apply -input=false -auto-approve doculens-demo.tfplan
+      - name: Wait for ECS service stability
+        run: aws ecs wait services-stable --cluster doculens-demo --services doculens-demo --region "$AWS_REGION_VALUE"
       - name: Smoke ALB health
         run: |
           HEALTH_URL=$(terraform -chdir=infra/aws output -raw health_url)
