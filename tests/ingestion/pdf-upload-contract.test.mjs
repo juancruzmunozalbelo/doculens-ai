@@ -180,7 +180,22 @@ async function requestMultipart(baseUrl, { body = Buffer.alloc(0), contentType, 
   });
 }
 
-function multipartBody({ title = 'Converted PDF NDA', file, extraFiles = [], boundary = 'doculens-test-boundary' } = {}) {
+async function requestJson(baseUrl, pathname, { method = 'GET', token = 'owner-token', body } = {}) {
+  const headers = { accept: 'application/json' };
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+  let payload;
+  if (body !== undefined) {
+    headers['content-type'] = 'application/json';
+    payload = JSON.stringify(body);
+  }
+  const response = await fetch(`${baseUrl}${pathname}`, { method, headers, body: payload });
+  const text = await response.text();
+  return { status: response.status, body: text ? JSON.parse(text) : null };
+}
+
+function multipartBody({ title, file, extraFiles = [], boundary = 'doculens-test-boundary' } = {}) {
   const parts = [];
   function pushText(value) {
     parts.push(Buffer.from(value, 'utf8'));
@@ -210,9 +225,10 @@ async function postPdf(baseUrl, {
   bytes = safePdfBytes(),
   appendFile = true,
   extraFiles = [],
+  omitTitle = false,
 } = {}) {
   const multipart = multipartBody({
-    title,
+    title: omitTitle ? undefined : title,
     file: appendFile ? { filename, type, bytes } : null,
     extraFiles: extraFiles.map((extra) => ({
       filename: extra.filename ?? 'extra.pdf',
@@ -287,9 +303,10 @@ function assertSafePdfFailure(response, expectedStatus, label, { category } = {}
   }
 }
 
-test('authenticated PDF upload converts text-based PDFs through document ingestion and persists PDF-derived chunks', async (t) => {
+test('authenticated PDF upload converts text-based PDFs through document ingestion and persists safe PDF source metadata', async (t) => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'doculens-pdf-success-'));
   const converterCalls = [];
+  const pdfBytes = safePdfBytes();
   const { baseUrl, documents } = await createPdfUploadHarness(t, {
     tempRoot,
     pdfConverter: {
@@ -305,12 +322,18 @@ test('authenticated PDF upload converts text-based PDFs through document ingesti
     },
   });
 
-  const response = await postPdf(baseUrl);
+  const response = await postPdf(baseUrl, { bytes: pdfBytes });
 
   assert.equal(response.status, 201, 'successful PDF upload must create a document');
   assert.equal(response.body.document.title, 'Converted PDF NDA');
   assert.equal(response.body.document.status, 'ready');
   assert.equal(response.body.document.sourceType, 'pdf', 'successful upload must identify the document as PDF-derived');
+  assert.equal(response.body.document.metadata.sourceMethod, 'pdf_upload');
+  assert.equal(response.body.document.metadata.originalBasename, 'Acme-Beta-NDA.pdf');
+  assert.equal(response.body.document.metadata.safeOriginalBasename, 'Acme-Beta-NDA.pdf');
+  assert.equal(response.body.document.metadata.mimeType, 'application/pdf');
+  assert.equal(response.body.document.metadata.sizeBytes, pdfBytes.length);
+  assert.match(response.body.document.metadata.uploadedAt, /^\d{4}-\d{2}-\d{2}T/, 'PDF metadata must expose upload time');
   assert.equal(converterCalls.length, 1, 'valid PDFs must be converted exactly once');
   assert.match(response.body.document.content, /Acme must keep Beta financial information confidential for three years/);
 
@@ -321,6 +344,42 @@ test('authenticated PDF upload converts text-based PDFs through document ingesti
     /financial information confidential|return materials within ten days/,
     'persisted chunks must be derived from converter text, not the uploaded filename or raw PDF bytes',
   );
+
+  const renamed = await requestJson(baseUrl, `/api/documents/${response.body.document.id}`, {
+    method: 'PATCH',
+    body: { title: 'Renamed PDF Source' },
+  });
+  assert.equal(renamed.status, 200, 'rename endpoint must update PDF source title');
+  assert.equal(renamed.body.document.title, 'Renamed PDF Source');
+  assert.equal(renamed.body.document.content, response.body.document.content, 'rename must preserve source content');
+  assert.deepEqual(renamed.body.document.metadata, response.body.document.metadata, 'rename must preserve safe original filename metadata');
+
+  const persisted = await documents.getDocument({ currentUser: owner, documentId: response.body.document.id });
+  assert.equal(persisted.title, 'Renamed PDF Source');
+  assert.deepEqual(persisted.metadata, response.body.document.metadata, 'safe PDF metadata must survive repository persistence');
+  await assertNoTempFiles(tempRoot);
+});
+
+test('PDF upload sanitizes hostile original basenames before title fallback and metadata persistence', async (t) => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'doculens-pdf-hostile-name-'));
+  const { baseUrl } = await createPdfUploadHarness(t, {
+    tempRoot,
+    pdfConverter: async () => ({ text: '# Hostile filename source\n\nSafe converted text from a valid PDF.' }),
+  });
+
+  const response = await postPdf(baseUrl, {
+    omitTitle: true,
+    filename: '..\\..\\sk-test_SECRET-token-abc123456789.pdf',
+  });
+
+  assert.equal(response.status, 201, 'valid hostile-name PDF upload must still create a source');
+  assert.equal(response.body.document.title, 'redacted-filename');
+  assert.equal(response.body.document.metadata.originalBasename, 'redacted-filename.pdf');
+  assert.equal(response.body.document.metadata.safeOriginalBasename, 'redacted-filename.pdf');
+  assert.equal(response.body.document.metadata.sourceMethod, 'pdf_upload');
+  assert.match(response.body.document.metadata.uploadedAt, /^\d{4}-\d{2}-\d{2}T/);
+  const serialized = JSON.stringify(response.body.document);
+  assert.doesNotMatch(serialized, /sk-test|SECRET|token-abc|[\\/]\.\./i, 'source API must not expose hostile path or secret-shaped filename parts');
   await assertNoTempFiles(tempRoot);
 });
 

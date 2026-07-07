@@ -1,0 +1,106 @@
+{
+  "chunkingExpectations": {
+    "expectedHeadingPaths": [
+      [
+        "Full Stack AI Engineer Assessment",
+        "Overview and objective"
+      ],
+      [
+        "Full Stack AI Engineer Assessment",
+        "Backend requirements"
+      ],
+      [
+        "Full Stack AI Engineer Assessment",
+        "Frontend requirements"
+      ],
+      [
+        "Full Stack AI Engineer Assessment",
+        "Data, privacy, and logging requirements"
+      ],
+      [
+        "Full Stack AI Engineer Assessment",
+        "Reliability and evaluation requirements"
+      ],
+      [
+        "Full Stack AI Engineer Assessment",
+        "Deployment and operations requirements"
+      ],
+      [
+        "Full Stack AI Engineer Assessment",
+        "Deliverables"
+      ]
+    ],
+    "minimumChunkCount": 10,
+    "minimumTokenEstimate": 765
+  },
+  "description": "Sanitized generated Full Stack AI Engineer Assessment fixture for DocuLens upload, retrieval, parsing, and E2E golden-path tests.",
+  "files": {
+    "extractedText": {
+      "encoding": "utf-8",
+      "path": "tests/fixtures/assessment/full-stack-ai-engineer-assessment.txt",
+      "sha256": "3c2dda4ad429ca295ed5debbf5223e9c4ae63a687777549e5389c0d7ad80376f",
+      "sizeBytes": 5386
+    },
+    "pdf": {
+      "mimeType": "application/pdf",
+      "minimumPageCount": 3,
+      "path": "tests/fixtures/assessment/full-stack-ai-engineer-assessment.pdf",
+      "sha256": "e925c79984a5b3c9c93031820d87e32c206b47315c5892a90b645659fd31e7d2",
+      "sizeBytes": 7818,
+      "textBased": true
+    }
+  },
+  "fixtureId": "full-stack-ai-engineer-assessment",
+  "generatedAt": "2026-07-07T00:00:00.000Z",
+  "pageTextSnippets": [
+    "Full Stack AI Engineer Assessment",
+    "REST API for authentication, document creation, analysis, chat, and source retrieval",
+    "React and provide a user-friendly flow with source intake, review briefing, starter questions, chat input, answer cards, and inspectable evidence",
+    "safe original basename, MIME type, size, source method, and upload time",
+    "AWS infrastructure described or provisioned using Terraform or CloudFormation",
+    "Git repository with runnable local setup instructions and a README"
+  ],
+  "safeToCommit": true,
+  "sanitized": true,
+  "schemaVersion": 1,
+  "sourceMetadataExpectations": {
+    "createdAt": {
+      "allowedFallbackForUploadedAt": true,
+      "format": "iso-8601"
+    },
+    "displayTitleIncludes": [
+      "Full Stack AI Engineer Assessment"
+    ],
+    "forbiddenDisplayPatterns": [
+      "```json",
+      "providerPayload",
+      "rawProviderPayload",
+      "retrievedChunkIds",
+      "chunk_",
+      "00000000-0000-0000-0000-000000000000",
+      "MINIMAX_API_KEY=",
+      "AWS_SECRET_ACCESS_KEY=",
+      "/Users/",
+      "Traceback"
+    ],
+    "mimeType": "application/pdf",
+    "originalBasename": "full-stack-ai-engineer-assessment.pdf",
+    "safeOriginalBasename": "full-stack-ai-engineer-assessment.pdf",
+    "sizeBytes": 7818,
+    "sourceMethod": "pdf_upload",
+    "sourceType": "pdf",
+    "status": "ready",
+    "uploadedAt": {
+      "format": "iso-8601",
+      "required": true
+    }
+  },
+  "titleMarkers": [
+    "Full Stack AI Engineer Assessment",
+    "Backend requirements",
+    "Frontend requirements",
+    "Data, privacy, and logging requirements",
+    "Deployment and operations requirements",
+    "Deliverables"
+  ]
+}

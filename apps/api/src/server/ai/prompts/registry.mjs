@@ -6,7 +6,7 @@ const DEFINITIONS = new Map([
   ['doculens.analysis', {
     id: 'doculens.analysis',
     version: PROMPT_VERSION,
-    description: 'DocuLens document analysis prompt for structured summaries, obligations, risks, and uncertainties.',
+    description: 'DocuLens document analysis prompt for structured summaries, sections, requirements, deliverables, risks, uncertainties, and reviewer questions.',
     build: (input) => buildPromptMessages({ ...input, promptId: 'doculens.analysis', promptVersion: input?.promptVersion ?? PROMPT_VERSION }),
   }],
   ['doculens.chat', {

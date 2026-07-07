@@ -1,0 +1,264 @@
+%PDF-1.4
+% DocuLens sanitized generated assessment fixture
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R 8 0 R] /Count 3 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 2326 >>
+stream
+BT
+/F1 11 Tf
+72 744 Td
+16 TL
+(Full Stack AI Engineer Assessment) Tj
+T*
+( ) Tj
+T*
+(Overview and objective) Tj
+T*
+(This sanitized generated fixture describes a Full Stack AI Engineer Assessment for) Tj
+T*
+(DocuLens-style review tests. The candidate must build an AI-powered full-stack) Tj
+T*
+(application that accepts a reviewer document, analyzes it with a large language model) Tj
+T*
+(through a backend provider boundary, and lets the reviewer ask follow-up questions) Tj
+T*
+(grounded in the selected source. The assessment values practical engineering judgment, a) Tj
+T*
+(runnable end-to-end path, and clear trade-offs over architecture theater.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Application scope) Tj
+T*
+(The product should feel like a document review assistant rather than a raw prompt) Tj
+T*
+(console. A reviewer signs in, adds a source document, sees a concise briefing, asks) Tj
+T*
+(questions, and inspects evidence. The app may use a safe sample document, pasted text,) Tj
+T*
+(or a text-based PDF upload. Scanned-image OCR is not required. The generated review) Tj
+T*
+(should explain limitations honestly when the selected source does not support a claim.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Backend requirements) Tj
+T*
+(The backend must expose a REST API for authentication, document creation, analysis,) Tj
+T*
+(chat, and source retrieval. It must include an endpoint that sends prompts to an LLM) Tj
+T*
+(provider through a provider abstraction instead of calling a vendor directly from UI) Tj
+T*
+(code. The backend must normalize model responses before returning them, persist) Tj
+T*
+(documents and messages, and keep analysis results stable across save and reload) Tj
+T*
+(boundaries. JWT authentication is expected for protected routes, and ownership checks) Tj
+T*
+(must prevent one reviewer from reading another reviewer source.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(AI and retrieval requirements) Tj
+T*
+(The AI path must combine document-level analysis with retrieval-grounded chat. Source) Tj
+T*
+(text should be normalized, chunked, and searched before answering specific questions.) Tj
+T*
+(The chat answer should cite evidence when retrieved chunks support the response, and it) Tj
+T*
+(should use a clear insufficient-evidence state when the selected document does not) Tj
+T*
+(Page 1 of 3 - sanitized generated assessment fixture) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 2351 >>
+stream
+BT
+/F1 11 Tf
+72 744 Td
+16 TL
+(support a specific claim. Broad overview questions may produce a full-document overview) Tj
+T*
+(with a caveat when precise citations are not available. Prompt construction, provider) Tj
+T*
+(configuration, and response parsing should be explicit enough for review.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Frontend requirements) Tj
+T*
+(The frontend must be implemented in React and provide a user-friendly flow with source) Tj
+T*
+(intake, review briefing, starter questions, chat input, answer cards, and inspectable) Tj
+T*
+(evidence. It should include loading states, empty states, error states, and retry or) Tj
+T*
+(refine actions. AI responses must be formatted as readable prose and structured) Tj
+T*
+(sections, not raw JSON. The UI should help the reviewer re-ask or narrow a question,) Tj
+T*
+(display uncertainty when appropriate, and keep the active source identity visible while) Tj
+T*
+(switching between sources.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Data, privacy, and logging requirements) Tj
+T*
+(The application must describe what document data is stored, when it is sent to a third-) Tj
+T*
+(party AI provider, and how long it is retained for the assessment demo. Logs must avoid) Tj
+T*
+(raw document text, provider payloads, stack traces, local file paths, and secret-shaped) Tj
+T*
+(values. PDF metadata shown to the reviewer should use a safe original basename, MIME) Tj
+T*
+(type, size, source method, and upload time. Configuration and secure secret handling) Tj
+T*
+(must keep provider keys, JWT secrets, database passwords, and cloud credentials out of) Tj
+T*
+(source control and out of reviewer-facing output.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Reliability and evaluation requirements) Tj
+T*
+(The project should include targeted tests for authentication, ownership, ingestion,) Tj
+T*
+(provider parsing, retrieval policy, chat answer states, and UI regression paths.) Tj
+T*
+(Evaluation should include golden questions about the assessment document, including) Tj
+T*
+(overview, backend, frontend, data and privacy, reliability, deployment, and) Tj
+T*
+(deliverables. The implementation should fail safely when conversion, retrieval,) Tj
+T*
+(provider, or network operations fail, preserving prior useful output and giving the) Tj
+T*
+(reviewer a recovery action.) Tj
+T*
+( ) Tj
+T*
+(Page 2 of 3 - sanitized generated assessment fixture) Tj
+ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>
+endobj
+9 0 obj
+<< /Length 1737 >>
+stream
+BT
+/F1 11 Tf
+72 744 Td
+16 TL
+( ) Tj
+T*
+(Deployment and operations requirements) Tj
+T*
+(The assessment expects deployment thinking with AWS infrastructure described or) Tj
+T*
+(provisioned using Terraform or CloudFormation. The design should separate configuration) Tj
+T*
+(from code, handle secrets through environment or managed secret stores, and explain) Tj
+T*
+(scaling considerations for API, database, PDF processing, and AI provider latency. The) Tj
+T*
+(demo infrastructure can be small and disposable, but the repository should make) Tj
+T*
+(operational assumptions and teardown steps clear.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Deliverables) Tj
+T*
+(The candidate must deliver a Git repository with runnable local setup instructions and a) Tj
+T*
+(README that explains architecture, AI design, data flow, privacy decisions, reliability) Tj
+T*
+(strategy, deployment approach, and trade-offs. The README should include how to run the) Tj
+T*
+(app, how to run targeted tests, how to configure the AI provider safely, and what is) Tj
+T*
+(intentionally out of scope. Evidence of working behavior is more important than diagrams) Tj
+T*
+(without implementation.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Review rubric markers) Tj
+T*
+(A strong submission demonstrates a coherent full-stack path, secure authentication,) Tj
+T*
+(source-grounded AI answers, normalized structured output, useful frontend states,) Tj
+T*
+(documented data handling, targeted automated tests, and credible AWS deployment choices.) Tj
+T*
+(A weak submission exposes raw model payloads, invents unsupported facts, hides errors,) Tj
+T*
+(omits persistence, ignores privacy, or cannot be run by the reviewer.) Tj
+T*
+( ) Tj
+T*
+( ) Tj
+T*
+(Page 3 of 3 - sanitized generated assessment fixture) Tj
+ET
+endstream
+endobj
+10 0 obj
+<< /Title (Full Stack AI Engineer Assessment) /Author (DocuLens Test Fixture) /Subject (Sanitized generated assessment fixture) /Creator (DocuLens fixture generator) /Producer (DocuLens deterministic PDF generator) /CreationDate (D:20260707000000Z) /ModDate (D:20260707000000Z) >>
+endobj
+xref
+0 11
+0000000000 65535 f 
+0000000059 00000 n 
+0000000108 00000 n 
+0000000177 00000 n 
+0000000274 00000 n 
+0000000400 00000 n 
+0000002778 00000 n 
+0000002904 00000 n 
+0000005307 00000 n 
+0000005433 00000 n 
+0000007222 00000 n 
+trailer
+<< /Size 11 /Root 1 0 R /Info 10 0 R >>
+startxref
+7519
+%%EOF

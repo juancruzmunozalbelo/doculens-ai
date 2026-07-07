@@ -11,13 +11,21 @@ const DISPLAY_COPY = Object.freeze({
     label: 'Based on this document',
     message: 'Based on this document.',
   },
+  full_document_overview: {
+    label: 'Full-document overview',
+    message: 'This is a source-wide overview. It may not include precise inline citations.',
+  },
   insufficient_evidence: {
     label: 'Not enough evidence',
-    message: 'Not enough evidence in this document yet. Ask a more specific question about obligations, risks, parties, dates, or sections in the selected source.',
+    message: 'The selected source does not contain enough evidence for that specific question. Try asking about named sections, requirements, dates, parties, risks, or ask for a source overview.',
   },
   unsupported: {
     label: 'Outside this document',
-    message: 'Outside this document. Ask about obligations, risks, parties, dates, or terms contained in the selected source.',
+    message: 'Outside this document. Ask about requirements, risks, parties, dates, sections, or terms contained in the selected source.',
+  },
+  error: {
+    label: 'Could not answer',
+    message: 'DocuLens could not answer that question. Your previous answers are still available; try again or refine the question.',
   },
 });
 
@@ -30,6 +38,42 @@ const SENSITIVE_DISPLAY_PATTERNS = Object.freeze([
 ]);
 
 const UNSAFE_DISPLAY_KEY_PATTERN = /(?:chain.*thought|hidden.*reasoning|internal.*policy|system.*policy|system.*prompt|developer.*instruction|raw.*provider|provider.*payload|provider.*response|response.*id|reasoning|think)/i;
+
+const SUPPORT_STOPWORDS = new Set([
+  'about',
+  'after',
+  'also',
+  'answer',
+  'based',
+  'before',
+  'between',
+  'could',
+  'document',
+  'from',
+  'have',
+  'include',
+  'into',
+  'must',
+  'question',
+  'requires',
+  'selected',
+  'shall',
+  'should',
+  'source',
+  'that',
+  'their',
+  'there',
+  'these',
+  'this',
+  'through',
+  'what',
+  'when',
+  'where',
+  'which',
+  'with',
+  'would',
+]);
+const SUPPORT_TOKEN_PATTERN = /[a-z0-9][a-z0-9'-]{2,}/g;
 
 function requireText(value, field) {
   if (typeof value !== 'string' || value.trim() === '') {
@@ -245,10 +289,14 @@ function normalizeAnalysisResult(providerResult, { secrets }) {
   displayWarnings.push(...sanitizedSummary.warnings);
   const analysis = {
     summary: sanitizedSummary.text,
+    sections: sanitizeDisplayValue(asArray(source.sections), secrets, displayWarnings),
     entities: sanitizeDisplayValue(asArray(source.entities), secrets, displayWarnings),
+    requirements: sanitizeDisplayValue(asArray(source.requirements), secrets, displayWarnings),
     obligations: sanitizeDisplayValue(asArray(source.obligations), secrets, displayWarnings),
+    deliverables: sanitizeDisplayValue(asArray(source.deliverables), secrets, displayWarnings),
     risks: sanitizeDisplayValue(asArray(source.risks), secrets, displayWarnings),
     uncertainties: sanitizeDisplayValue(asArray(source.uncertainties), secrets, displayWarnings),
+    recommendedQuestions: sanitizeDisplayValue(asArray(source.recommendedQuestions ?? source.recommended_questions), secrets, displayWarnings),
     displayWarnings: [...new Set(displayWarnings)],
     metadata: {
       ...metadata,
@@ -280,37 +328,219 @@ function scoreSummaryFrom(metadata = {}, strategy = {}) {
   return strategy.retrievalScoreSummary ?? metadata.retrievalScoreSummary ?? null;
 }
 
-function buildDisplayState({ metadata, strategy, citations }) {
+function safeSourceTitle(document, secrets) {
+  const metadata = isObject(document?.metadata) ? document.metadata : {};
+  const rawTitle = document?.title
+    ?? metadata.safeOriginalBasename
+    ?? metadata.originalBasename
+    ?? metadata.filename
+    ?? 'the selected source';
+  return sanitizeDisplayText(rawTitle, secrets, 'the selected source')
+    .text
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, 'selected source')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80) || 'the selected source';
+}
+
+function refinementSuggestionsFor({ document, strategy, secrets }) {
+  const title = safeSourceTitle(document, secrets);
+  if (strategy?.contextStrategy === 'unsupported') {
+    return [
+      `Ask a question that can be answered from "${title}".`,
+      `Ask what "${title}" says about a named section, requirement, date, party, or risk.`,
+      `Ask for a source overview of "${title}".`,
+    ];
+  }
+  if (strategy?.fallbackReason === 'low_retrieval_coverage') {
+    return [
+      `Ask about a named section, requirement, date, party, or risk in "${title}".`,
+      'Use exact wording from the source preview for the passage you want checked.',
+      `Ask for a source overview of "${title}" if you want a broader summary.`,
+    ];
+  }
+  return [];
+}
+
+function normalizedContainmentText(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function supportTokens(value) {
+  const tokens = String(value ?? '').toLowerCase().match(SUPPORT_TOKEN_PATTERN) ?? [];
+  return [...new Set(tokens.filter((token) => !SUPPORT_STOPWORDS.has(token) && token.length >= 3))];
+}
+
+function chunkSupportText(chunk) {
+  return [
+    chunk?.content,
+    chunk?.contentExcerpt,
+    chunk?.content_excerpt,
+    ...(Array.isArray(chunk?.headingPath) ? chunk.headingPath : []),
+    ...(Array.isArray(chunk?.heading_path) ? chunk.heading_path : []),
+  ].filter((value) => typeof value === 'string' && value.trim() !== '').join(' ');
+}
+
+function citationQuoteMatchesChunk(quote, chunk) {
+  const normalizedQuote = normalizedContainmentText(quote);
+  if (normalizedQuote.length < 6) {
+    return false;
+  }
+  return normalizedContainmentText(chunkSupportText(chunk)).includes(normalizedQuote);
+}
+
+function answerSupportedByChunk(answerText, chunk) {
+  const answerTokens = supportTokens(answerText);
+  const chunkTokens = supportTokens(chunkSupportText(chunk));
+  if (answerTokens.length === 0 || chunkTokens.length === 0) {
+    return false;
+  }
+  const chunkTokenSet = new Set(chunkTokens);
+  const overlap = answerTokens.filter((token) => chunkTokenSet.has(token)).length;
+  const denominator = Math.min(answerTokens.length, chunkTokens.length, 8);
+  return overlap >= 3 && overlap / denominator >= 0.45;
+}
+
+function quoteForCitation(citation, chunk, secrets) {
+  if (citationQuoteMatchesChunk(citation?.quote, chunk)) {
+    return sanitizeDisplayText(String(citation.quote), secrets).text;
+  }
+  const quoteSource = typeof chunk?.contentExcerpt === 'string' && chunk.contentExcerpt.trim() !== ''
+    ? chunk.contentExcerpt
+    : typeof chunk?.content === 'string'
+      ? chunk.content
+      : chunkSupportText(chunk);
+  return sanitizeDisplayText(quoteSource.slice(0, 240), secrets).text;
+}
+
+function parseStructuredProviderText(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') {
+    return null;
+  }
+  const fence = text.match(/^```(?:json|javascript|js)?\s*([\s\S]*?)\s*```$/i);
+  const candidate = fence ? fence[1].trim() : text;
+  if (!/^[{[]/.test(candidate)) {
+    return null;
+  }
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function structuredProviderPayload(providerResult = {}) {
+  if (isObject(providerResult.answer)) {
+    return providerResult.answer;
+  }
+  for (const key of ['text', 'content', 'answer']) {
+    if (typeof providerResult[key] === 'string') {
+      const parsed = parseStructuredProviderText(providerResult[key]);
+      if (isObject(parsed?.answer)) {
+        return parsed.answer;
+      }
+      if (isObject(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return null;
+}
+
+function providerAnswerText(providerResult = {}) {
+  const structured = structuredProviderPayload(providerResult);
+  if (isObject(structured)) {
+    for (const key of ['text', 'answer', 'content', 'summary']) {
+      if (typeof structured[key] === 'string') {
+        return structured[key];
+      }
+    }
+  }
+  if (typeof providerResult.text === 'string') {
+    return providerResult.text;
+  }
+  if (typeof providerResult.content === 'string') {
+    return providerResult.content;
+  }
+  if (typeof providerResult.answer === 'string') {
+    return providerResult.answer;
+  }
+  return '';
+}
+
+function providerCitations(providerResult = {}) {
+  if (Array.isArray(providerResult.citations)) {
+    return providerResult.citations;
+  }
+  const structured = structuredProviderPayload(providerResult);
+  if (isObject(structured) && Array.isArray(structured.citations)) {
+    return structured.citations;
+  }
+  return [];
+}
+
+function providerUncertainty(providerResult = {}, strategy) {
+  if (providerResult.uncertainty !== undefined) {
+    return providerResult.uncertainty;
+  }
+  const structured = structuredProviderPayload(providerResult);
+  if (isObject(structured) && structured.uncertainty !== undefined) {
+    return structured.uncertainty;
+  }
+  return strategy.contextStrategy === 'fallback' ? 'unknown' : null;
+}
+
+function buildDisplayState({ metadata, strategy, citations, document, secrets }) {
   const scoreSummary = scoreSummaryFrom(metadata, strategy);
   const passingChunks = Number(scoreSummary?.passingChunks ?? 0);
   const topScore = Number(scoreSummary?.topScore ?? scoreSummary?.maxScore ?? 0);
   const relevanceThreshold = scoreSummary?.relevanceThreshold ?? null;
   const citationCount = asArray(citations).length;
+  const suggestions = refinementSuggestionsFor({ document, strategy, secrets });
 
   if (strategy.contextStrategy === 'unsupported') {
+    const title = safeSourceTitle(document, secrets);
     return {
       kind: 'unsupported',
       label: DISPLAY_COPY.unsupported.label,
-      message: DISPLAY_COPY.unsupported.message,
+      message: `That is not covered by the selected source. Ask about "${title}" or sections contained in it.`,
       reason: strategy.unsupportedReason ?? 'outside_document_scope',
       citationCount: 0,
       passingChunks,
       relevanceThreshold,
+      suggestions,
+    };
+  }
+
+  if (strategy.contextStrategy === 'fallback' && strategy.fallbackReason === 'global_question') {
+    return {
+      kind: 'full_document_overview',
+      label: DISPLAY_COPY.full_document_overview.label,
+      message: DISPLAY_COPY.full_document_overview.message,
+      reason: 'global_question',
+      citationCount: 0,
+      passingChunks,
+      relevanceThreshold,
+      suggestions: [],
     };
   }
 
   if (strategy.contextStrategy === 'fallback') {
-    if (citationCount === 0 || passingChunks <= 0 || topScore <= 0) {
-      return {
-        kind: 'insufficient_evidence',
-        label: DISPLAY_COPY.insufficient_evidence.label,
-        message: DISPLAY_COPY.insufficient_evidence.message,
-        reason: strategy.fallbackReason ?? 'fallback_full_document',
-        citationCount,
-        passingChunks,
-        relevanceThreshold,
-      };
-    }
+    return {
+      kind: 'insufficient_evidence',
+      label: DISPLAY_COPY.insufficient_evidence.label,
+      message: DISPLAY_COPY.insufficient_evidence.message,
+      reason: strategy.fallbackReason ?? 'low_retrieval_coverage',
+      citationCount: 0,
+      passingChunks,
+      relevanceThreshold,
+      suggestions,
+    };
   }
 
   if (citationCount === 0 || passingChunks <= 0 || topScore <= 0) {
@@ -322,6 +552,7 @@ function buildDisplayState({ metadata, strategy, citations }) {
       citationCount,
       passingChunks,
       relevanceThreshold,
+      suggestions,
     };
   }
 
@@ -333,6 +564,7 @@ function buildDisplayState({ metadata, strategy, citations }) {
     citationCount,
     passingChunks,
     relevanceThreshold,
+    suggestions: [],
   };
 }
 
@@ -340,26 +572,32 @@ function citationPolicyFor(displayState, strategy) {
   if (displayState.kind === 'unsupported') {
     return 'no_citations_for_unsupported_answer';
   }
+  if (displayState.kind === 'error') {
+    return 'no_citations_for_error';
+  }
   if (displayState.kind === 'insufficient_evidence') {
     return 'insufficient_evidence_no_grounded_citations';
   }
+  if (displayState.kind === 'full_document_overview') {
+    return 'full_document_overview_no_chunk_citations';
+  }
   if (strategy.contextStrategy === 'fallback') {
-    return 'fallback_full_document_no_chunk_citations';
+    return 'full_document_no_chunk_citations';
   }
   return 'retrieved_chunk_ids_only';
 }
 
-function normalizeProviderAnswer(providerResult = {}, { metadata, strategy, citations, secrets }) {
-  const rawText = providerResult.text ?? providerResult.answer ?? providerResult.content ?? '';
+function normalizeProviderAnswer(providerResult = {}, { metadata, strategy, citations, secrets, document }) {
+  const rawText = providerAnswerText(providerResult);
   const providerMetadata = safeProviderMetadata(providerResult.metadata, secrets);
   const displayWarnings = [];
-  const sanitizedText = sanitizeDisplayText(String(rawText), secrets, DISPLAY_COPY.insufficient_evidence.message);
+  const sanitizedText = sanitizeDisplayText(rawText, secrets);
   displayWarnings.push(...sanitizedText.warnings);
   const sanitizedCitations = sanitizeDisplayValue(citations, secrets, displayWarnings);
-  const displayState = buildDisplayState({ metadata, strategy, citations: sanitizedCitations });
+  const displayState = buildDisplayState({ metadata, strategy, citations: sanitizedCitations, document, secrets });
   const answerText = displayState.kind === 'insufficient_evidence'
     ? DISPLAY_COPY.insufficient_evidence.message
-    : sanitizedText.text;
+    : sanitizedText.text || displayState.message;
   const answerMetadata = sanitizeMetadataValue({
     ...providerMetadata,
     ...metadata,
@@ -382,37 +620,38 @@ function normalizeProviderAnswer(providerResult = {}, { metadata, strategy, cita
     displayText: answerText,
     displayState,
     displayWarnings: [...new Set(displayWarnings)],
-    citations: sanitizedCitations,
-    uncertainty: providerResult.uncertainty ?? (strategy.contextStrategy === 'fallback' ? 'unknown' : null),
+    citations: displayState.kind === 'grounded' ? sanitizedCitations : [],
+    uncertainty: providerUncertainty(providerResult, strategy),
     metadata: answerMetadata,
   };
 }
 
-function validCitations(providerCitations, retrievedChunks, secrets) {
+function validCitations(providerCitationValues, retrievedChunks, answerText, secrets) {
   const chunksByStableId = new Map(retrievedChunks.map((chunk) => [chunk.chunkId ?? chunk.id, chunk]));
-  return asArray(providerCitations)
-    .filter((citation) => chunksByStableId.has(citation?.chunkId))
-    .map((citation, index) => ({
-      chunkId: citation.chunkId,
-      quote: sanitizeDisplayText(String(citation.quote ?? ''), secrets).text,
-      citationIndex: index,
-    }));
+  return asArray(providerCitationValues)
+    .filter((citation) => {
+      const chunk = chunksByStableId.get(citation?.chunkId);
+      return chunk && (citationQuoteMatchesChunk(citation?.quote, chunk) || answerSupportedByChunk(answerText, chunk));
+    })
+    .map((citation, index) => {
+      const chunk = chunksByStableId.get(citation.chunkId);
+      return {
+        chunkId: citation.chunkId,
+        quote: quoteForCitation(citation, chunk, secrets),
+        citationIndex: index,
+      };
+    });
 }
 
-function fallbackCitationFromRetrievedChunk(retrievedChunks, secrets) {
-  const chunk = retrievedChunks[0];
+function fallbackCitationFromRetrievedChunk(retrievedChunks, answerText, secrets) {
+  const chunk = retrievedChunks.find((candidate) => answerSupportedByChunk(answerText, candidate));
   const chunkId = chunk?.chunkId ?? chunk?.id;
   if (typeof chunkId !== 'string' || chunkId.trim() === '') {
     return [];
   }
-  const quoteSource = typeof chunk.contentExcerpt === 'string' && chunk.contentExcerpt.trim() !== ''
-    ? chunk.contentExcerpt
-    : typeof chunk.content === 'string'
-      ? chunk.content
-      : '';
   return [{
     chunkId,
-    quote: sanitizeDisplayText(quoteSource.slice(0, 240), secrets).text,
+    quote: quoteForCitation({}, chunk, secrets),
     citationIndex: 0,
   }];
 }
@@ -422,8 +661,8 @@ function sanitizeRetrievedChunks(retrievedChunks, secrets) {
   return asArray(retrievedChunks).map((chunk) => sanitizeDisplayValue(chunk, secrets, warnings));
 }
 
-function unsupportedAnswer({ metadata, strategy, secrets }) {
-  const displayState = buildDisplayState({ metadata, strategy, citations: [] });
+function unsupportedAnswer({ metadata, strategy, secrets, document }) {
+  const displayState = buildDisplayState({ metadata, strategy, citations: [], document, secrets });
   const displayWarnings = [];
   const answerMetadata = sanitizeMetadataValue({
     ...metadata,
@@ -439,11 +678,51 @@ function unsupportedAnswer({ metadata, strategy, secrets }) {
   }, secrets);
   delete answerMetadata.retrievedChunks;
   return {
-    text: DISPLAY_COPY.unsupported.message,
-    displayText: DISPLAY_COPY.unsupported.message,
+    text: displayState.message,
+    displayText: displayState.message,
     displayState,
     displayWarnings,
     unsupported: true,
+    citations: [],
+    uncertainty: null,
+    metadata: answerMetadata,
+  };
+}
+
+function errorAnswer({ metadata = {}, secrets, document }) {
+  const scoreSummary = scoreSummaryFrom(metadata, {});
+  const title = safeSourceTitle(document, secrets);
+  const displayState = {
+    kind: 'error',
+    label: DISPLAY_COPY.error.label,
+    message: DISPLAY_COPY.error.message,
+    reason: 'chat_operation_failed',
+    citationCount: 0,
+    passingChunks: Number(scoreSummary?.passingChunks ?? 0),
+    relevanceThreshold: scoreSummary?.relevanceThreshold ?? null,
+    suggestions: [
+      `Try asking again about "${title}".`,
+      'Refine the question or ask for a source overview.',
+    ],
+  };
+  const displayWarnings = [];
+  const answerMetadata = sanitizeMetadataValue({
+    ...metadata,
+    retrievedChunks: undefined,
+    contextStrategy: 'error',
+    displayState,
+    displaySafety: {
+      sanitized: true,
+      redactionWarnings: displayWarnings,
+    },
+    citationPolicy: 'no_citations_for_error',
+  }, secrets);
+  delete answerMetadata.retrievedChunks;
+  return {
+    text: DISPLAY_COPY.error.message,
+    displayText: DISPLAY_COPY.error.message,
+    displayState,
+    displayWarnings,
     citations: [],
     uncertainty: null,
     metadata: answerMetadata,
@@ -536,12 +815,18 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
   async function answerQuestion({ currentUser, documentId, question: rawQuestion }) {
     const question = requireText(rawQuestion, 'question');
     const document = await loadOwnedDocument({ documents, currentUser, documentId, resourceType: 'message', action: 'create' });
-    const retrievalResult = await retrievalProvider.retrieve({
-      documentId: document.id,
-      userId: currentUser.id,
-      query: question,
-      limit: CHAT_TOP_K,
-    });
+    let retrievalResult;
+    try {
+      retrievalResult = await retrievalProvider.retrieve({
+        documentId: document.id,
+        userId: currentUser.id,
+        query: question,
+        limit: CHAT_TOP_K,
+      });
+    } catch {
+      const answer = errorAnswer({ metadata: {}, secrets, document });
+      return { statusCode: 503, answer, retrievedChunks: [] };
+    }
     const retrievedChunks = asArray(retrievalResult?.retrievedChunks);
     const strategy = decideRetrievalStrategy({
       question,
@@ -557,7 +842,7 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
     const safeRetrievalMetadata = { ...retrievalMetadata, retrievedChunks: safeRetrievedChunks };
 
     if (strategy.contextStrategy === 'unsupported') {
-      const answer = unsupportedAnswer({ metadata: safeRetrievalMetadata, strategy, secrets });
+      const answer = unsupportedAnswer({ metadata: safeRetrievalMetadata, strategy, secrets, document });
       await maybeSave(chatStore, {
         documentId: document.id,
         userId: currentUser.id,
@@ -592,18 +877,26 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
         thinkingMode: 'standard',
       },
     };
-    const providerResult = await aiProvider.answerQuestion(providerPayload);
+    let providerResult;
+    try {
+      providerResult = await aiProvider.answerQuestion(providerPayload);
+    } catch {
+      const answer = errorAnswer({ metadata: safeRetrievalMetadata, secrets, document });
+      return { statusCode: 503, answer, retrievedChunks: safeRetrievedChunks };
+    }
+    const answerCandidateText = providerAnswerText(providerResult);
     const validProviderCitations = strategy.contextStrategy === 'rag'
-      ? validCitations(providerResult.citations, retrievedChunks, secrets)
+      ? validCitations(providerCitations(providerResult), retrievedChunks, answerCandidateText, secrets)
       : [];
     const acceptedCitations = strategy.contextStrategy === 'rag' && validProviderCitations.length === 0
-      ? fallbackCitationFromRetrievedChunk(retrievedChunks, secrets)
+      ? fallbackCitationFromRetrievedChunk(retrievedChunks, answerCandidateText, secrets)
       : validProviderCitations;
     const answer = normalizeProviderAnswer(providerResult, {
       metadata: safeRetrievalMetadata,
       strategy,
       citations: acceptedCitations,
       secrets,
+      document,
     });
 
     await maybeSave(chatStore, {

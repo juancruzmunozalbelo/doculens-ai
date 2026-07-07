@@ -67,10 +67,6 @@ function sendJson(response, statusCode, payload) {
   response.end(body);
 }
 
-function sendNoContent(response) {
-  response.writeHead(204);
-  response.end();
-}
 
 function instrumentResponse(response) {
   const originalWriteHead = response.writeHead.bind(response);
@@ -429,8 +425,12 @@ export function createDocuLensServer(config, overrides = {}) {
               sourceType: 'pdf',
               metadata: {
                 source: 'pdf_upload',
+                sourceMethod: upload.sourceMethod,
+                originalBasename: upload.originalBasename,
+                safeOriginalBasename: upload.safeOriginalBasename,
                 mimeType: upload.mimeType,
                 sizeBytes: upload.sizeBytes,
+                uploadedAt: upload.uploadedAt,
                 limits: {
                   maxFileBytes: pdfUploadLimits.maxFileBytes,
                   maxPages: pdfUploadLimits.maxPages,
@@ -484,10 +484,19 @@ export function createDocuLensServer(config, overrides = {}) {
         return;
       }
 
+      if (documentId && method === 'PATCH') {
+        await handleProtected(request, response, services, async (currentUser) => {
+          const body = await readJsonBody(request);
+          const document = await services.documents.updateDocumentTitle({ currentUser, documentId, title: body.title });
+          sendJson(response, 200, { document });
+        });
+        return;
+      }
+
       if (documentId && method === 'DELETE') {
         await handleProtected(request, response, services, async (currentUser) => {
-          await services.documents.deleteDocument({ currentUser, documentId });
-          sendNoContent(response);
+          const result = await services.documents.deleteDocument({ currentUser, documentId });
+          sendJson(response, 200, result);
         });
         return;
       }

@@ -130,10 +130,14 @@ const analysisJson = `json_build_object(
   'id', a.id::text,
   'documentId', a.document_id::text,
   'summary', a.summary,
+  'sections', coalesce(a.provider_metadata->'sections', '[]'::jsonb),
   'entities', a.entities,
+  'requirements', coalesce(a.provider_metadata->'requirements', '[]'::jsonb),
   'obligations', a.obligations,
+  'deliverables', coalesce(a.provider_metadata->'deliverables', '[]'::jsonb),
   'risks', a.risks,
   'uncertainties', a.uncertainties,
+  'recommendedQuestions', coalesce(a.provider_metadata->'recommendedQuestions', '[]'::jsonb),
   'metadata', jsonb_build_object(
     'provider', a.provider,
     'model', a.model,
@@ -282,6 +286,25 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
             and deleted_at is null
          ), 'null'::json);`,
         { documentId, userId },
+      );
+    },
+    async updateTitleForUser({ documentId, userId, title }) {
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), updated as (
+           update documents
+           set title = data->>'title',
+               updated_at = now()
+           from input
+           where id = (input.data->>'documentId')::uuid
+             and user_id = (input.data->>'userId')::uuid
+             and status <> 'failed'
+             and deleted_at is null
+           returning ${documentJson} as document
+         )
+         select coalesce((select document from updated), 'null'::json);`,
+        { documentId, userId, title },
       );
     },
     async deleteByIdForUser({ documentId, userId }) {
@@ -447,7 +470,12 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
              nullif(coalesce(data->'metadata'->'tokenUsage'->>'input', data->'metadata'->'tokenEstimate'->>'input'), '')::integer,
              nullif(coalesce(data->'metadata'->'tokenUsage'->>'output', data->'metadata'->'tokenEstimate'->>'output'), '')::integer,
              case when jsonb_typeof(data->'metadata'->'tokenEstimate') = 'number' then (data->'metadata'->>'tokenEstimate')::integer else null end,
-             data->'metadata'
+             data->'metadata' || jsonb_build_object(
+               'sections', coalesce(data->'analysis'->'sections', '[]'::jsonb),
+               'requirements', coalesce(data->'analysis'->'requirements', '[]'::jsonb),
+               'deliverables', coalesce(data->'analysis'->'deliverables', '[]'::jsonb),
+               'recommendedQuestions', coalesce(data->'analysis'->'recommendedQuestions', '[]'::jsonb)
+             )
            from input
            returning *
          )

@@ -104,33 +104,283 @@ function responseContent(providerResponse) {
   return choice?.message?.content ?? choice?.text ?? providerResponse?.output_text ?? '';
 }
 
+const UNSTRUCTURED_CONTENT = Symbol('unstructured MiniMax content');
+
+const SAFE_ANALYSIS_LIMITATION_SUMMARY = 'DocuLens could not convert the AI response into a structured briefing. Regenerate the briefing or inspect the source directly.';
+const SAFE_ANALYSIS_LIMITATION_DETAIL = 'The briefing needs regeneration because the AI response was not structured enough to display safely.';
+
+const SECRET_SHAPED_PATTERNS = Object.freeze([
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g,
+  /\bsk-(?:minimax[_-]?)?[A-Za-z0-9_-]{16,}\b/gi,
+  /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+  /postgres(?:ql)?:\/\/([^:\s/@]+):([^@\s]+)@([^\s'")]+)/gi,
+  /\b(?:api[_-]?key|secret(?:[_-]?key)?|password|passwd|token|authorization)\s*[:=]\s*["']?[^\s'",;]{8,}["']?/gi,
+]);
+
+const UNSAFE_DISPLAY_KEY_PATTERN = /(?:chain.*thought|hidden.*reasoning|internal.*policy|system.*policy|system.*prompt|developer.*instruction|raw.*provider|provider.*payload|provider.*response|response.*id|reasoning|think|document.*id|chunk.*id|\bid\b)/i;
+
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function stripMarkdownJsonFence(content) {
+  const text = String(content ?? '').trim();
+  const fullFence = text.match(/^```(?:json|javascript|js)?\s*([\s\S]*?)\s*```$/i);
+  if (fullFence) {
+    return fullFence[1].trim();
+  }
+  const firstJsonFence = text.match(/```(?:json|javascript|js)?\s*([\s\S]*?)\s*```/i);
+  return firstJsonFence ? firstJsonFence[1].trim() : text;
+}
+
+function parseJsonCandidate(content) {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
 function parseJsonContent(content) {
   if (typeof content !== 'string' || content.trim() === '') {
     return {};
   }
-  try {
-    const parsed = JSON.parse(content);
-    return parsed && typeof parsed === 'object' ? parsed : { answer: String(parsed) };
-  } catch {
-    return { answer: content };
+
+  const candidate = stripMarkdownJsonFence(content);
+  const parsed = parseJsonCandidate(candidate);
+  if (parsed !== null) {
+    return isObject(parsed) ? parsed : { items: Array.isArray(parsed) ? parsed : [], answer: Array.isArray(parsed) ? '' : String(parsed) };
   }
+
+  const fallback = { answer: candidate };
+  Object.defineProperty(fallback, UNSTRUCTURED_CONTENT, { value: true });
+  return fallback;
 }
 
-function analysisFromParsedContent(parsed) {
-  if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim() !== '') {
-    return parsed;
+function payloadForDisplay(parsed) {
+  if (isObject(parsed?.answer)) {
+    return parsed.answer;
   }
-  const summary = typeof parsed?.answer === 'string' && parsed.answer.trim() !== ''
-    ? parsed.answer
-    : typeof parsed?.content === 'string' && parsed.content.trim() !== ''
-      ? parsed.content
-      : 'MiniMax returned analysis text without structured JSON.';
+  return isObject(parsed) ? parsed : {};
+}
+
+function textFromPayload(payload) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (!isObject(payload)) {
+    return '';
+  }
+  if (isObject(payload.answer)) {
+    return textFromPayload(payload.answer);
+  }
+  for (const key of ['text', 'answer', 'summary', 'final', 'content']) {
+    if (typeof payload[key] === 'string' && payload[key].trim() !== '') {
+      return payload[key];
+    }
+  }
+  return '';
+}
+
+function displayTextFromStructuredString(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') {
+    return '';
+  }
+  const candidate = stripMarkdownJsonFence(text);
+  if (!/^[{["]/.test(candidate)) {
+    return text;
+  }
+  const parsed = parseJsonCandidate(candidate);
+  if (parsed === null) {
+    return text;
+  }
+  const display = textFromPayload(payloadForDisplay(isObject(parsed) ? parsed : { answer: String(parsed) }));
+  return display || '';
+}
+
+function sanitizeDisplayText(value, secrets = {}, fallback = '') {
+  let text = displayTextFromStructuredString(value);
+  text = redactSecrets(text, secrets)
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+    .replace(/<think\b[^>]*>[\s\S]*$/gi, '')
+    .replace(/^\s*(?:chain[-\s]?of[-\s]?thought|hidden reasoning|reasoning trace|internal analysis|internal policy|system prompt|developer instructions?)\s*:.*$/gim, '')
+    .replace(/^\s*.*\b(?:cannot|can't|won't)\b.*\b(?:chain[-\s]?of[-\s]?thought|hidden reasoning|system prompt|developer instruction|internal policy)\b.*$/gim, '')
+    .replace(/<\/?(?:system|developer|policy|hidden_reasoning|provider_payload)[^>]*>/gi, '')
+    .replace(/["']?\b(?:providerResponseId|provider_response_id|response_id|documentId|document_id|chunkId|chunk_id)\b["']?\s*[:=]\s*["']?[A-Za-z0-9._:-]+["']?/gi, '')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[REDACTED:ID]')
+    .replace(/(?:\\n|\n)\s*at\s+[^\n"]+/g, '\n[REDACTED:STACK_TRACE]')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  for (const pattern of SECRET_SHAPED_PATTERNS) {
+    pattern.lastIndex = 0;
+    text = text.replace(pattern, '[REDACTED]');
+  }
+
+  return text || fallback;
+}
+
+function sanitizeDisplayValue(value, secrets = {}) {
+  if (typeof value === 'string') {
+    return sanitizeDisplayText(value, secrets);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDisplayValue(item, secrets)).filter((item) => {
+      if (typeof item === 'string') return item.trim() !== '';
+      if (isObject(item)) return Object.keys(item).length > 0;
+      return item !== null && item !== undefined;
+    });
+  }
+  if (isObject(value)) {
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !UNSAFE_DISPLAY_KEY_PATTERN.test(key))
+      .map(([key, item]) => [key, sanitizeDisplayValue(item, secrets)])
+      .filter(([, item]) => {
+        if (typeof item === 'string') return item.trim() !== '';
+        if (Array.isArray(item)) return item.length > 0;
+        if (isObject(item)) return Object.keys(item).length > 0;
+        return item !== null && item !== undefined;
+      }));
+  }
+  return value;
+}
+
+function firstArray(source, keys) {
+  for (const key of keys) {
+    if (Array.isArray(source?.[key])) {
+      return source[key];
+    }
+  }
+  return [];
+}
+
+function normalizedStructuredItems(value, { stringKey, allowedKeys, requiredKey = stringKey, secrets }) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      if (typeof item === 'string') {
+        return { [stringKey]: sanitizeDisplayText(item, secrets) };
+      }
+      if (!isObject(item)) {
+        return null;
+      }
+      const normalized = {};
+      for (const key of allowedKeys) {
+        const itemValue = item[key] ?? (key === stringKey ? item.description ?? item.summary ?? item.name : undefined);
+        if (typeof itemValue === 'string') {
+          normalized[key] = sanitizeDisplayText(itemValue, secrets);
+        } else if (typeof itemValue === 'boolean' || Number.isFinite(itemValue)) {
+          normalized[key] = itemValue;
+        }
+      }
+      return typeof normalized[requiredKey] === 'string' && normalized[requiredKey].trim() !== '' ? normalized : null;
+    })
+    .filter(Boolean);
+}
+
+function normalizedStringList(value, secrets) {
+  return (Array.isArray(value) ? value : [])
+    .map((item) => {
+      if (typeof item === 'string') {
+        return sanitizeDisplayText(item, secrets);
+      }
+      if (isObject(item)) {
+        return sanitizeDisplayText(item.text ?? item.question ?? item.summary ?? item.description ?? '', secrets);
+      }
+      return '';
+    })
+    .filter((item) => item.trim() !== '');
+}
+
+function analysisFromParsedContent(parsed, secrets = {}) {
+  const source = payloadForDisplay(parsed);
+
+  if (parsed?.[UNSTRUCTURED_CONTENT]) {
+    return {
+      summary: SAFE_ANALYSIS_LIMITATION_SUMMARY,
+      sections: [],
+      entities: [],
+      requirements: [],
+      obligations: [],
+      deliverables: [],
+      risks: [],
+      uncertainties: [SAFE_ANALYSIS_LIMITATION_DETAIL],
+      recommendedQuestions: [
+        'What are the main requirements in this source?',
+        'What deliverables does this source request?',
+        'What risks or uncertainties should I review?',
+      ],
+    };
+  }
+
+  const summary = sanitizeDisplayText(
+    source.summary ?? (typeof parsed?.answer === 'string' && parsed.answer.trim() !== '' ? parsed.answer : source.content ?? source.text),
+    secrets,
+    SAFE_ANALYSIS_LIMITATION_SUMMARY,
+  );
+
   return {
     summary,
-    entities: Array.isArray(parsed?.entities) ? parsed.entities : [],
-    obligations: Array.isArray(parsed?.obligations) ? parsed.obligations : [],
-    risks: Array.isArray(parsed?.risks) ? parsed.risks : [],
-    uncertainties: Array.isArray(parsed?.uncertainties) ? parsed.uncertainties : ['Provider returned prose instead of structured JSON.'],
+    sections: normalizedStructuredItems(firstArray(source, ['sections', 'parts', 'outline']), {
+      stringKey: 'title',
+      allowedKeys: ['title', 'summary', 'sourceQuote'],
+      secrets,
+    }),
+    entities: normalizedStructuredItems(firstArray(source, ['entities']), {
+      stringKey: 'name',
+      allowedKeys: ['name', 'type', 'description'],
+      secrets,
+    }),
+    requirements: normalizedStructuredItems(firstArray(source, ['requirements', 'requiredItems', 'required_items']), {
+      stringKey: 'text',
+      allowedKeys: ['category', 'text', 'sourceQuote'],
+      secrets,
+    }),
+    obligations: normalizedStructuredItems(firstArray(source, ['obligations']), {
+      stringKey: 'text',
+      allowedKeys: ['party', 'text', 'sourceQuote'],
+      secrets,
+    }),
+    deliverables: normalizedStructuredItems(firstArray(source, ['deliverables']), {
+      stringKey: 'text',
+      allowedKeys: ['text', 'sourceQuote'],
+      secrets,
+    }),
+    risks: normalizedStructuredItems(firstArray(source, ['risks', 'tradeoffs', 'tradeOffs']), {
+      stringKey: 'text',
+      allowedKeys: ['severity', 'text', 'sourceQuote', 'derivedReviewerRisk'],
+      secrets,
+    }),
+    uncertainties: normalizedStringList(source.uncertainties, secrets),
+    recommendedQuestions: normalizedStringList(source.recommendedQuestions ?? source.recommended_questions ?? source.questions, secrets),
+  };
+}
+
+function normalizedCitations(value, secrets = {}) {
+  return (Array.isArray(value) ? value : [])
+    .map((citation) => {
+      if (!isObject(citation)) {
+        return null;
+      }
+      const chunkId = typeof citation.chunkId === 'string'
+        ? sanitizeDisplayText(citation.chunkId, secrets)
+        : '';
+      const quote = sanitizeDisplayText(citation.quote ?? citation.text ?? '', secrets);
+      return chunkId && quote ? { chunkId, quote } : null;
+    })
+    .filter(Boolean);
+}
+
+function normalizedProviderAnswer(parsed, secrets = {}) {
+  const source = payloadForDisplay(parsed);
+  const answer = sanitizeDisplayText(textFromPayload(source), secrets, '');
+  return {
+    answer,
+    citations: normalizedCitations(source.citations, secrets),
+    uncertainty: typeof source.uncertainty === 'string'
+      ? sanitizeDisplayText(source.uncertainty, secrets)
+      : source.uncertainty ?? null,
+    metadata: sanitizeDisplayValue(isObject(source.metadata) ? source.metadata : {}, secrets),
   };
 }
 
@@ -277,11 +527,12 @@ export function createMiniMaxProvider({
       secrets: { ...secrets, minimaxApiKey: configuredApiKey },
     });
     const { parsed, metadata } = await invoke({ prompt, messages, context: providerContext });
+    const normalized = normalizedProviderAnswer(parsed, secrets);
     return {
-      answer: parsed.answer ?? parsed.content ?? '',
-      citations: Array.isArray(parsed.citations) ? parsed.citations : [],
-      uncertainty: parsed.uncertainty ?? null,
-      metadata,
+      answer: normalized.answer,
+      citations: normalized.citations,
+      uncertainty: normalized.uncertainty,
+      metadata: { ...normalized.metadata, ...metadata },
     };
   }
 
@@ -299,7 +550,7 @@ export function createMiniMaxProvider({
       secrets: { ...secrets, minimaxApiKey: configuredApiKey },
     });
     const { parsed, metadata } = await invoke({ prompt, messages, context: { ...context, strategy: context.strategy ?? 'analysis' } });
-    return { analysis: analysisFromParsedContent(parsed), metadata };
+    return { analysis: analysisFromParsedContent(parsed, secrets), metadata };
   }
 
   return assertAIProvider({ answerQuestion, analyzeDocument });

@@ -121,70 +121,183 @@ test('MiniMaxProvider satisfies the AIProvider contract and returns auditable pr
   );
 });
 
-test('MiniMaxProvider normalizes prose analysis responses into service-acceptable analysis shape', async () => {
+test('MiniMaxProvider normalizes structured analysis from top-level JSON, fenced JSON, nested answer objects, and prose fallback', async (t) => {
   const { createMiniMaxProvider } = await importRequired(
     'apps/api/src/server/ai/minimax-provider.mjs',
     ['createMiniMaxProvider'],
     'MiniMax provider',
   );
 
-  const proseSummary = 'The agreement requires Acme to protect Beta financial information for three years and flags unresolved audit-scope uncertainty.';
-  const transportCalls = [];
-  const provider = createMiniMaxProvider({
-    apiKey: 'minimax-test-key-analysis-prose-canary',
-    baseUrl: 'https://api.minimax.io/v1',
-    model: 'MiniMax-M3',
-    transport: async (request) => {
-      transportCalls.push(request);
-      return {
-        id: 'minimax-analysis-prose-response-1',
+  const canonicalAnalysis = Object.freeze({
+    summary: 'The assessment asks candidates to build an AI-powered full-stack application and explain architecture, reliability, and AWS deployment trade-offs.',
+    sections: [{ title: 'Backend', summary: 'REST API, LLM endpoint, persistence, and JWT authentication are required.' }],
+    entities: [{ name: 'Full Stack AI Engineer Assessment', type: 'assessment' }],
+    requirements: [{ category: 'Backend', text: 'Provide a REST API, AI interaction endpoint, persistence layer, and JWT authentication.' }],
+    obligations: [],
+    deliverables: [{ text: 'Submit a Git repository and README with local run instructions and architecture notes.' }],
+    risks: [{ severity: 'medium', text: 'AI reliability and hallucination handling must be explained as reviewer-facing trade-offs.' }],
+    uncertainties: ['The fixture leaves provider choice open.'],
+    recommendedQuestions: ['What backend requirements does the assessment list?'],
+  });
+
+  const cases = [
+    {
+      name: 'top-level JSON',
+      content: JSON.stringify(canonicalAnalysis),
+      expected: canonicalAnalysis,
+    },
+    {
+      name: 'Markdown fenced JSON',
+      content: ['```json', JSON.stringify(canonicalAnalysis), '```'].join('\n'),
+      expected: canonicalAnalysis,
+    },
+    {
+      name: 'nested answer object',
+      content: JSON.stringify({ answer: canonicalAnalysis, provider_response_id: 'raw-provider-response-id' }),
+      expected: canonicalAnalysis,
+    },
+    {
+      name: 'prose-only fallback',
+      content: 'This assessment asks for a full-stack AI app with backend, frontend, reliability, and deployment deliverables.',
+      expected: {
+        summary: 'DocuLens could not convert the AI response into a structured briefing. Regenerate the briefing or inspect the source directly.',
+        sections: [],
+        entities: [],
+        requirements: [],
+        obligations: [],
+        deliverables: [],
+        risks: [],
+        uncertainties: ['The briefing needs regeneration because the AI response was not structured enough to display safely.'],
+        recommendedQuestions: [
+          'What are the main requirements in this source?',
+          'What deliverables does this source request?',
+          'What risks or uncertainties should I review?',
+        ],
+      },
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async () => {
+      const transportCalls = [];
+      const provider = createMiniMaxProvider({
+        apiKey: 'minimax-test-key-analysis-canonical-canary',
+        baseUrl: 'https://api.minimax.io/v1',
         model: 'MiniMax-M3',
-        choices: [{ message: { content: proseSummary } }],
-        usage: { prompt_tokens: 88, completion_tokens: 21, total_tokens: 109 },
-      };
-    },
-  });
+        transport: async (request) => {
+          transportCalls.push(request);
+          return {
+            id: `minimax-analysis-${currentCase.name}`,
+            model: 'MiniMax-M3',
+            choices: [{ message: { content: currentCase.content } }],
+            usage: { prompt_tokens: 88, completion_tokens: 21, total_tokens: 109 },
+          };
+        },
+      });
 
-  const result = await provider.analyzeDocument({
-    documentId: 'doc-analysis-prose',
-    userId: 'user-1',
-    document: {
-      id: 'doc-analysis-prose',
-      title: 'NDA',
-      text: 'Acme must protect Beta financial information for three years. Audit scope remains unresolved.',
-    },
-    prompt: { id: analysisPromptId, version: '2026-07-07.1' },
-    context: { strategy: 'full_document', thinkingMode: 'standard' },
-  });
+      const result = await provider.analyzeDocument({
+        documentId: 'doc-assessment-analysis',
+        userId: 'user-1',
+        document: {
+          id: 'doc-assessment-analysis',
+          title: 'Full Stack AI Engineer Assessment',
+          text: 'Build an AI-powered full-stack app with backend, frontend, reliability, and AWS deliverables.',
+        },
+        prompt: { id: analysisPromptId, version: '2026-07-07.1' },
+        context: { strategy: 'full_document', thinkingMode: 'standard' },
+      });
 
-  assert.equal(transportCalls.length, 1, 'analysis must make exactly one deterministic MiniMax transport call');
-  assert.deepEqual(
-    result.analysis,
-    {
-      summary: proseSummary,
-      entities: [],
-      obligations: [],
-      risks: [],
-      uncertainties: ['Provider returned prose instead of structured JSON.'],
-    },
-    'prose MiniMax content must be normalized into the structured analysis contract required by the service layer',
+      assert.equal(transportCalls.length, 1, `${currentCase.name} analysis must make one provider transport call`);
+      assert.deepEqual(
+        result.analysis,
+        currentCase.expected,
+        `${currentCase.name} must normalize into the canonical reviewer-facing analysis contract`,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(result.analysis),
+        /```|provider[_\s-]*response|Provider returned prose instead of structured JSON|MiniMax returned analysis text without structured JSON/i,
+        `${currentCase.name} analysis must not expose raw fences, provider IDs, or implementation diagnostics`,
+      );
+      assert.equal(result.metadata.provider, 'minimax');
+      assert.equal(result.metadata.model, 'MiniMax-M3');
+      assert.equal(result.metadata.contextStrategy, 'full_document');
+    });
+  }
+});
+
+test('MiniMaxProvider normalizes chat answers from fenced JSON and nested answer objects', async (t) => {
+  const { createMiniMaxProvider } = await importRequired(
+    'apps/api/src/server/ai/minimax-provider.mjs',
+    ['createMiniMaxProvider'],
+    'MiniMax provider',
   );
-  assert.deepEqual(
-    result.metadata,
+
+  const cases = [
     {
-      provider: 'minimax',
-      model: 'MiniMax-M3',
-      promptId: analysisPromptId,
-      promptVersion: '2026-07-07.1',
-      contextStrategy: 'full_document',
-      retrievalBackend: null,
-      fallbackReason: null,
-      providerResponseId: 'minimax-analysis-prose-response-1',
-      tokenUsage: { input: 88, output: 21, total: 109 },
-      thinkingMode: 'standard',
+      name: 'fenced JSON answer',
+      content: ['```json', JSON.stringify({
+        answer: 'The backend must expose a REST API, an AI interaction endpoint, persistence, and JWT authentication.',
+        citations: [{ chunkId: 'chunk-backend', quote: 'REST API and JWT authentication' }],
+        uncertainty: 'low',
+        provider_payload: 'RAW_PROVIDER_PAYLOAD_CANARY',
+      }), '```'].join('\n'),
+      expectedAnswer: 'The backend must expose a REST API, an AI interaction endpoint, persistence, and JWT authentication.',
+      expectedCitations: [{ chunkId: 'chunk-backend', quote: 'REST API and JWT authentication' }],
+      expectedUncertainty: 'low',
     },
-    'normalized prose analysis must retain auditable provider/model/prompt/context metadata',
-  );
+    {
+      name: 'nested answer object',
+      content: JSON.stringify({
+        answer: {
+          text: 'The frontend must use React, show loading, error, and empty states, and render AI responses clearly.',
+          citations: [{ chunkId: 'chunk-frontend', quote: 'React frontend with loading, error, and empty states' }],
+          uncertainty: 'medium',
+        },
+        raw_provider_response: 'RAW_PROVIDER_PAYLOAD_CANARY',
+      }),
+      expectedAnswer: 'The frontend must use React, show loading, error, and empty states, and render AI responses clearly.',
+      expectedCitations: [{ chunkId: 'chunk-frontend', quote: 'React frontend with loading, error, and empty states' }],
+      expectedUncertainty: 'medium',
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async () => {
+      const provider = createMiniMaxProvider({
+        apiKey: 'minimax-test-key-chat-canonical-canary',
+        baseUrl: 'https://api.minimax.io/v1',
+        model: 'MiniMax-M3',
+        transport: async () => ({
+          id: `minimax-chat-${currentCase.name}`,
+          model: 'MiniMax-M3',
+          choices: [{ message: { content: currentCase.content } }],
+          usage: { prompt_tokens: 120, completion_tokens: 35, total_tokens: 155 },
+        }),
+      });
+
+      const result = await provider.answerQuestion({
+        documentId: 'doc-assessment-chat',
+        userId: 'user-1',
+        question: 'What does the assessment require?',
+        prompt: { id: chatPromptId, version: '2026-07-07.1' },
+        context: {
+          strategy: 'rag',
+          retrievalBackend: 'hybrid',
+          fallbackReason: null,
+          chunks: [{ chunkId: currentCase.expectedCitations[0].chunkId, headingPath: ['Assessment'], text: currentCase.expectedCitations[0].quote }],
+        },
+      });
+
+      assert.equal(result.answer, currentCase.expectedAnswer, `${currentCase.name} must expose safe answer text, not raw JSON`);
+      assert.deepEqual(result.citations, currentCase.expectedCitations, `${currentCase.name} must preserve normalized citation objects`);
+      assert.equal(result.uncertainty, currentCase.expectedUncertainty, `${currentCase.name} must preserve normalized uncertainty`);
+      assert.doesNotMatch(
+        JSON.stringify({ answer: result.answer, citations: result.citations, uncertainty: result.uncertainty }),
+        /```|RAW_PROVIDER_PAYLOAD|raw_provider|provider_payload/i,
+        `${currentCase.name} must not leak provider formatting or payload fields`,
+      );
+    });
+  }
 });
 
 test('prompt registry exposes versioned prompt IDs for analysis, chat, fallback, unsupported, and prompt-injection handling', async (t) => {
