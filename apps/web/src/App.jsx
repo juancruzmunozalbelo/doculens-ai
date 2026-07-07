@@ -1089,7 +1089,8 @@ function ReviewWorkspace({ auth, route, documents, document, analysis, latestAns
 
   const latestMetadata = latestAnswer?.metadata ?? analysis?.metadata ?? null;
   const chatLoading = loading && /search|answer|evidence/i.test(loading) ? loading : '';
-  const pageLoading = chatLoading ? '' : loading;
+  const briefingLoading = loading && /briefing|analysis/i.test(loading) ? loading : '';
+  const pageLoading = chatLoading || briefingLoading ? '' : loading;
   return (
     <AppShell auth={auth} route={route} selectedDocument={document} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={() => {}} onLogout={onLogout}>
       <section data-testid={TEST_IDS.workspaceRoot} className="review-workspace" style={{ display: 'grid', gap: '1rem' }}>
@@ -1102,7 +1103,7 @@ function ReviewWorkspace({ auth, route, documents, document, analysis, latestAns
           </aside>
           <SourcePreview document={document} activeEvidence={activeEvidence} />
           <div style={{ display: 'grid', gap: '1rem' }}>
-            <ReviewBriefing analysis={analysis} loading={pageLoading} onAnalyze={onAnalyze} />
+            <ReviewBriefing analysis={analysis} loading={briefingLoading} onAnalyze={onAnalyze} />
             <ChatSection document={document} analysis={analysis} question={question} loading={chatLoading} error={error} answerHistory={answerHistory} onQuestionChange={onQuestionChange} onSubmit={onQuestionSubmit} onRetry={onRetryQuestion} onSelectQuestion={onSelectQuestion} onSelectEvidence={onSelectEvidence} />
             <TrustLayer metadata={latestMetadata} answer={latestAnswer} />
           </div>

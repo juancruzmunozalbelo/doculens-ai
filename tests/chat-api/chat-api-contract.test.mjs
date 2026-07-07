@@ -846,17 +846,26 @@ test('chat endpoint refuses out-of-document questions without model invocation o
   const retrievalProvider = createRetrievalProviderFake({ chunks: [] });
   const aiProvider = createAiProviderFake();
   const { baseUrl } = await createServerHarness(t, { retrievalProvider, aiProvider, chatRepository: createChatRepositoryFake() });
+  const cases = [
+    { name: 'current stock price', question: 'What is Acme\'s current stock price today?' },
+    { name: 'weather', question: 'What is the weather today?' },
+  ];
 
-  const response = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
-    method: 'POST',
-    body: { question: 'What is Acme\'s current stock price today?' },
-  });
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async () => {
+      const response = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
+        method: 'POST',
+        body: { question: currentCase.question },
+      });
 
-  assert.equal(response.status, 200, 'unsupported chat should return a handled response, not a server error');
-  assert.equal(response.body.answer.unsupported, true, 'out-of-document questions must be surfaced as unsupported');
-  assert.equal(response.body.answer.metadata.contextStrategy, 'unsupported');
-  assert.equal(response.body.answer.metadata.unsupportedReason, 'outside_document_scope');
-  assert.deepEqual(response.body.answer.citations, [], 'unsupported answers must not fabricate citations');
+      assert.equal(response.status, 200, `${currentCase.name} unsupported chat should return a handled response, not a server error`);
+      assert.equal(response.body.answer.unsupported, true, `${currentCase.name} out-of-document question must be surfaced as unsupported`);
+      assert.equal(response.body.answer.metadata.contextStrategy, 'unsupported');
+      assert.equal(response.body.answer.metadata.unsupportedReason, 'outside_document_scope');
+      assert.deepEqual(response.body.answer.citations, [], `${currentCase.name} unsupported answer must not fabricate citations`);
+    });
+  }
+
   assert.equal(aiProvider.answerCalls.length, 0, 'unsupported answers must not invoke MiniMax to invent external facts');
 });
 
@@ -1031,6 +1040,20 @@ test('chat endpoint treats broad assessment requirements and deliverables questi
       evidence: 'The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval.',
       providerText: 'The source asks for a REST API, an LLM provider boundary, JWT authentication and ownership checks, React reviewer UX, privacy-safe logging, reliability tests, and AWS deployment thinking.',
       mustMention: ['REST API', 'LLM provider', 'JWT', 'React', 'AWS'],
+    },
+    {
+      name: 'generic source requirements',
+      question: 'What does this source require?',
+      evidence: 'The assessment requires a REST API, one persistence layer, JWT authentication, React frontend, AWS deployment, and a README.',
+      providerText: 'This source requires a REST API, persistence, JWT authentication, a React frontend, AWS deployment planning, and a README with architecture, AI design, trade-offs, limitations, and run instructions.',
+      mustMention: ['REST API', 'persistence', 'JWT', 'React', 'AWS', 'README'],
+    },
+    {
+      name: 'required by source phrasing',
+      question: 'What is required by this source?',
+      evidence: 'The candidate must build a small AI-assisted full-stack application and document architecture decisions.',
+      providerText: 'The source requires a small AI-assisted full-stack application, documented architecture decisions, AI design choices, trade-offs, limitations, and local run instructions.',
+      mustMention: ['full-stack application', 'architecture decisions', 'AI design', 'run instructions'],
     },
     {
       name: 'deliverables',

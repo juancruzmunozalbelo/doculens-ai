@@ -334,6 +334,48 @@ async function expectNoUnsafeReviewerArtifacts(page) {
   }
 }
 
+async function expectSingleBriefingLoadingStatus(page) {
+  const loading = byTestId(page, 'loading');
+  await expect(loading).toHaveCount(1);
+  await expect(loading).toContainText(/Generating summary|Generating review briefing|Preparing document|Building briefing/i);
+  await expect(loading).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
+  await expect(byTestId(page, 'reviewBriefing').getByTestId(TEST_IDS.loading)).toHaveCount(1);
+}
+
+async function expectContainedNarrowSourcePreview(page) {
+  const layout = await page.evaluate((testIds) => {
+    const root = document.documentElement;
+    const select = (testId) => document.querySelector(`[data-testid="${testId}"]`);
+    const bounds = (testId) => select(testId)?.getBoundingClientRect();
+    const preview = bounds(testIds.evidencePanel);
+    const active = bounds(testIds.activeSource);
+    const sourceRail = bounds(testIds.sourceManagement);
+    const briefing = bounds(testIds.reviewBriefing);
+    const previewNode = select(testIds.evidencePanel);
+    const horizontallyContained = (rect) => !rect || (rect.left >= -2 && rect.right <= window.innerWidth + 2 && rect.width <= root.clientWidth + 2);
+    return {
+      scrollWidth: root.scrollWidth,
+      clientWidth: root.clientWidth,
+      previewClientHeight: previewNode?.clientHeight ?? 0,
+      previewScrollHeight: previewNode?.scrollHeight ?? 0,
+      viewportHeight: window.innerHeight,
+      previewContained: horizontallyContained(preview),
+      activeContained: horizontallyContained(active),
+      sourceRailContained: horizontallyContained(sourceRail),
+      briefingContained: horizontallyContained(briefing),
+      briefingHeight: briefing?.height ?? 0,
+    };
+  }, TEST_IDS);
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 2);
+  expect(layout.previewContained).toBe(true);
+  expect(layout.activeContained).toBe(true);
+  expect(layout.sourceRailContained).toBe(true);
+  if (layout.briefingHeight > 0) expect(layout.briefingContained).toBe(true);
+  expect(layout.previewClientHeight).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
+  expect(layout.previewScrollHeight).toBeGreaterThan(layout.previewClientHeight);
+}
+
+
 function analysisFor(document) {
   return {
     summary: `${document.title} requires the reviewer to verify confidentiality, delivery, risk, and recovery obligations in this source.`,
@@ -593,7 +635,7 @@ async function installDocuLensApiFake(page, {
         return;
       }
 
-      if (/whole document|summarize everything|what is this document about/i.test(question)) {
+      if (/whole document|summarize everything|what is this document about|what (?:does|do) (?:this )?(?:source|document) require|what is required by (?:this )?(?:source|document)|requirements? (?:of|for|in) (?:this )?(?:source|document)/i.test(question)) {
         await fulfillJson(route, 201, {
           answer: {
             text: 'The document is a mutual NDA about protecting confidential information, permitted legal disclosures, and returning or destroying materials.',
@@ -784,8 +826,7 @@ test('source-first notebook creates a ready active source, offers briefing and s
   await expect(byTestId(page, 'activeSource')).toContainText(sampleDocument.title);
 
   const analyzeClick = byTestId(page, 'documentAnalyze').click();
-  await expect(byTestId(page, 'loading').first()).toContainText(/Generating summary|Generating review briefing|Preparing document|Building briefing/i);
-  await expect(byTestId(page, 'loading').first()).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
+  await expectSingleBriefingLoadingStatus(page);
   releaseAnalysis();
   await analyzeClick;
 
@@ -828,7 +869,7 @@ test('answer cards normalize JSON-shaped provider text and inline citations sele
   await expectNoUnsafeReviewerArtifacts(page);
 });
 
-test('full-document overview without citations renders a caveated overview and outside-document questions render an unsupported state', async ({ page }) => {
+test('full-document overview and broad source requirement questions render caveated overview instead of low-evidence fallback', async ({ page }) => {
   await installDocuLensApiFake(page, { documents: [sampleDocument] });
   await signIn(page);
   await openSampleSource(page);
@@ -841,6 +882,15 @@ test('full-document overview without citations renders a caveated overview and o
   await expect(fallbackCard).not.toContainText(/Not enough evidence|Insufficient evidence|low_retrieval_coverage|citation-quality|chunk|0 citations/i);
   await expect(byTestId(page, 'trustSummary')).toContainText(/full-document overview|overview/i);
   await expect(byTestId(page, 'inlineCitation')).toHaveCount(0);
+
+  for (const question of ['What does this source require?', 'What is required by this source?']) {
+    await askQuestion(page, question);
+    const requirementCard = byTestId(page, 'answerCard').filter({ hasText: question }).first();
+    await expect(requirementCard).toContainText(/full-document overview|overview|source-wide/i);
+    await expect(requirementCard).toContainText(/mutual NDA|protecting confidential information|permitted legal disclosures|returning or destroying materials/i);
+    await expect(requirementCard).toContainText(/full selected source|not claiming precise citation coverage|not precise citation|without precise citations|caveat/i);
+    await expect(requirementCard).not.toContainText(/Not enough answer-specific evidence|Needs stronger evidence|Insufficient evidence|low_retrieval_coverage|citation-quality|chunk|0 citations/i);
+  }
 
   await askQuestion(page, 'What is Acme stock price?');
   const unsupportedCard = byTestId(page, 'answerCard').filter({ hasText: /Outside this document|unsupported by this document/i }).first();
@@ -901,29 +951,14 @@ test('narrow source workspace wraps long PDF filenames and keeps preview plus so
   await expect(byTestId(page, 'evidencePanel')).toBeVisible();
   await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Backend, frontend, data privacy/i);
 
-  const layout = await page.evaluate(() => {
-    const root = document.documentElement;
-    const preview = document.querySelector('[data-testid="evidence.panel"]')?.getBoundingClientRect();
-    const active = document.querySelector('[data-testid="source.active"]')?.getBoundingClientRect();
-    const sourceRail = document.querySelector('[data-testid="source.management"]')?.getBoundingClientRect();
-    const previewNode = document.querySelector('[data-testid="evidence.panel"]');
-    return {
-      scrollWidth: root.scrollWidth,
-      clientWidth: root.clientWidth,
-      previewWidth: preview?.width ?? 0,
-      activeWidth: active?.width ?? 0,
-      sourceRailWidth: sourceRail?.width ?? 0,
-      previewClientHeight: previewNode?.clientHeight ?? 0,
-      previewScrollHeight: previewNode?.scrollHeight ?? 0,
-      viewportHeight: window.innerHeight,
-    };
-  });
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 2);
-  expect(layout.previewWidth).toBeLessThanOrEqual(layout.clientWidth);
-  expect(layout.activeWidth).toBeLessThanOrEqual(layout.clientWidth);
-  expect(layout.sourceRailWidth).toBeLessThanOrEqual(layout.clientWidth);
-  expect(layout.previewClientHeight).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
-  expect(layout.previewScrollHeight).toBeGreaterThan(layout.previewClientHeight);
+  await expectContainedNarrowSourcePreview(page);
+
+  await byTestId(page, 'documentAnalyze').click();
+  const briefing = byTestId(page, 'reviewBriefing');
+  await expect(briefing).toContainText(/requires the reviewer to verify confidentiality, delivery, risk, and recovery obligations/i);
+  await expect(briefing).toContainText(/Obligations|Risks|Uncertainties|Recommended/i);
+  await expect(byTestId(page, 'evidencePanel')).toContainText(/Source preview/i);
+  await expectContainedNarrowSourcePreview(page);
 
   for (const button of [
     sourceCard.getByRole('button', { name: /^Open$/ }),
@@ -1098,8 +1133,7 @@ test('product shell exposes DocuLens favicon metadata and keeps active source vi
   await expect(byTestId(page, 'workspaceRoot')).toContainText(sampleDocument.title);
 
   const analyzeClick = byTestId(page, 'documentAnalyze').click();
-  await expect(byTestId(page, 'loading').first()).toContainText(/Generating summary|Generating review briefing|Preparing document|Building briefing/i);
-  await expect(byTestId(page, 'loading').first()).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
+  await expectSingleBriefingLoadingStatus(page);
   releaseAnalysis();
   await analyzeClick;
 });

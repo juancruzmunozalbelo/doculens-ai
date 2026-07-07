@@ -16,6 +16,8 @@ const GLOBAL_QUESTION_PATTERNS = [
   /\b(?:main|key|primary|core)\s+(?:requirements?|deliverables?|risks?|obligations?|expectations?)\b/i,
   /\bwhat\s+(?:are|were)\s+(?:the\s+)?(?:main|key|primary|core)?\s*(?:requirements?|deliverables?|risks?|obligations?|expectations?)\s+(?:in|from|for|of)\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
   /\bwhat\s+(?:deliverables?|requirements?|risks?|obligations?|expectations?)\s+does\s+(?:this|the)\s+(?:document|source|file|pdf)\s+(?:request|require|list|mention|describe|include)\b/i,
+  /\bwhat\s+does\s+(?:this|the)\s+(?:document|source|file|pdf)\s+(?:require|request|ask|expect|need)\b/i,
+  /\bwhat\s+is\s+(?:required|requested|expected|needed|asked)\s+(?:by|from|for|of)\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
   /\b(?:summarize|summarise|list|identify|extract)\s+(?:the\s+)?(?:requirements?|deliverables?|risks?|obligations?|expectations?)\s+(?:in|from|for|of)\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
 ];
 

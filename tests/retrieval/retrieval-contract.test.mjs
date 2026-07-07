@@ -617,9 +617,80 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       },
     },
     {
+      name: 'generic source requirement question uses source-wide fallback despite low retrieval coverage',
+      input: {
+        question: 'What does this source require?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'chunk-requirements-low-score', normalizedScore: 0.16 },
+        ],
+      },
+      expected: {
+        contextStrategy: 'fallback',
+        fallbackReason: 'global_question',
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.16,
+          minScore: 0.16,
+          averageScore: 0.16,
+          returnedChunks: 1,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
       name: 'what-is-this-document-about routes to global-question fallback for source overview',
       input: {
         question: 'What is this document about?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+      },
+      expected: {
+        contextStrategy: 'fallback',
+        fallbackReason: 'global_question',
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'what-does-this-source-require routes to global-question fallback for source-wide requirements',
+      input: {
+        question: 'What does this source require?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+      },
+      expected: {
+        contextStrategy: 'fallback',
+        fallbackReason: 'global_question',
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'what-is-required-by-this-source routes to global-question fallback for passive requirement phrasing',
+      input: {
+        question: 'What is required by this source?',
         retrievalBackend: 'hybrid',
         relevanceThreshold: 0.55,
         retrievedChunks: [],
@@ -666,6 +737,29 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       name: 'outside-document current-share-price question is unsupported instead of silently using full-document fallback',
       input: {
         question: 'What is the current share price of Contoso today?',
+        retrievalBackend: 'lexical_fallback',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+      },
+      expected: {
+        contextStrategy: 'unsupported',
+        fallbackReason: null,
+        unsupportedReason: 'outside_document_scope',
+        retrievalBackend: 'lexical_fallback',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'outside-document weather question is unsupported instead of using source-wide fallback',
+      input: {
+        question: 'What is the weather today?',
         retrievalBackend: 'lexical_fallback',
         relevanceThreshold: 0.55,
         retrievedChunks: [],
