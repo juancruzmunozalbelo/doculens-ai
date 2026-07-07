@@ -45,14 +45,14 @@
 
 ## 5. Analysis and Chat Behavior
 
-- [ ] 5.1 Implement document analysis endpoint using full-document MiniMax context and structured JSON output
-- [ ] 5.2 Validate and persist structured analysis with summary, entities, obligations, risks, uncertainties, and provider/model metadata
-- [ ] 5.3 Implement chat endpoint that retrieves chunks before model invocation for normal questions
-- [ ] 5.4 Build grounded chat prompt from retrieved chunks and require chunk-based citations for RAG answers
-- [ ] 5.5 Validate citations against retrieved chunk IDs and reject or mark invalid fabricated citations
-- [ ] 5.6 Implement unsupported-answer behavior for questions without document support
-- [ ] 5.7 Implement explicit fallback path for low retrieval coverage or global reasoning questions with fallback metadata and uncertainty
-- [ ] 5.8 Ensure prompt-injection attempts in document content cannot override system instructions, reveal secrets, or forge citations
+- [x] 5.1 Implement document analysis endpoint using full-document MiniMax context and structured JSON output
+- [x] 5.2 Validate and persist structured analysis with summary, entities, obligations, risks, uncertainties, and provider/model metadata
+- [x] 5.3 Implement chat endpoint that retrieves chunks before model invocation for normal questions
+- [x] 5.4 Build grounded chat prompt from retrieved chunks and require chunk-based citations for RAG answers
+- [x] 5.5 Validate citations against retrieved chunk IDs and reject or mark invalid fabricated citations
+- [x] 5.6 Implement unsupported-answer behavior for questions without document support
+- [x] 5.7 Implement explicit fallback path for low retrieval coverage or global reasoning questions with fallback metadata and uncertainty
+- [x] 5.8 Ensure prompt-injection attempts in document content cannot override system instructions, reveal secrets, or forge citations
 
 ## 6. Frontend Experience
 
@@ -129,7 +129,7 @@
 - [x] 11.4 Deliver PR 3 on `feat/doculens-ingestion` for ingestion/chunking tasks 3.1-3.3 with chunking, rollback, ownership, and PostgreSQL integrity tests
 - [ ] 11.5 Deliver PR 4 on `feat/doculens-retrieval` for retrieval/fallback tasks 3.4-3.9 with pgvector/hybrid preferred, labeled `lexical_fallback` only if blocked, backend metadata, and fallback policy tests
 - [x] 11.6 Deliver PR 5 on `feat/doculens-minimax` for AI provider and prompt safety tasks 4.1-4.10 with MiniMax live-smoke shape validation, budget gates, prompt-injection guardrails, and redaction canaries
-- [ ] 11.7 Deliver PR 6 on `feat/doculens-chat-api` for analysis/chat tasks 5.1-5.8 with structured analysis, RAG citations, unsupported-answer behavior, fallback metadata, and prompt-injection eval proof
+- [x] 11.7 Deliver PR 6 on `feat/doculens-chat-api` for analysis/chat tasks 5.1-5.8 with structured analysis, RAG citations, unsupported-answer behavior, fallback metadata, and prompt-injection eval proof
 - [ ] 11.8 Deliver PR 7 on `feat/doculens-ui` for frontend tasks 6.1-6.7 with Playwright E2E using only canonical `data-testid` locators
 - [ ] 11.9 Deliver PR 8 on `feat/doculens-eval` for eval/security proof tasks 7.1-7.16 gaps, including retrieval, fallback, citations, unsupported answers, prompt injection, authz, redaction, budget, and PostgreSQL integrity checks
 - [ ] 11.10 Deliver PR 9 on `feat/doculens-markitdown` for MarkItDown tasks 8.1-8.3 with sample PDF-to-Markdown smoke proof into the ingestion/chunking pipeline
