@@ -227,6 +227,7 @@ async function runLiveMiniMaxIfRequired() {
     baseUrl: process.env.MINIMAX_BASE_URL,
     model: process.env.MINIMAX_MODEL,
     budget: { maxLiveCalls: 1, maxInputTokens: 2_000, maxOutputTokens: 400, maxContextTokens: 2_000, maxRetries: 0, concurrencyLimit: 1, maxEstimatedCostUsd: 0.1 },
+    maxOutputTokens: 400,
   });
   const result = await provider.analyzeDocument({
     documentId: 'eval-live-minimax-demo',
