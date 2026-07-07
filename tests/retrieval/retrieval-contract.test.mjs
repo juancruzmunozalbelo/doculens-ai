@@ -711,6 +711,56 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       },
     },
     {
+      name: 'what-deliverables-are-expected routes to global-question fallback for source-wide deliverables',
+      input: {
+        question: 'What deliverables are expected?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+        document: { title: 'Full Stack AI Engineer Assessment', content: assessmentFixtureText },
+      },
+      expected: {
+        contextStrategy: 'fallback',
+        fallbackReason: 'global_question',
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'informal backend question uses source document topic fallback when retrieval is weak',
+      input: {
+        question: 'whats backend is necessary?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'assessment-overview', normalizedScore: 0.12 },
+        ],
+        document: { title: 'Full Stack AI Engineer Assessment', content: assessmentFixtureText },
+      },
+      expected: {
+        contextStrategy: 'fallback',
+        fallbackReason: 'global_question',
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.12,
+          minScore: 0.12,
+          averageScore: 0.12,
+          returnedChunks: 1,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
       name: 'outside-document current-facts question is unsupported instead of silently using full-document fallback',
       input: {
         question: 'What is the current stock price of Contoso today?',
@@ -779,6 +829,29 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
         },
       },
     },
+    {
+      name: 'outside-document spanish weather question is unsupported',
+      input: {
+        question: 'que clima es',
+        retrievalBackend: 'lexical_fallback',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+      },
+      expected: {
+        contextStrategy: 'unsupported',
+        fallbackReason: null,
+        unsupportedReason: 'outside_document_scope',
+        retrievalBackend: 'lexical_fallback',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
   ];
 
   for (const { name, input, expected } of cases) {
@@ -814,6 +887,7 @@ test('assessment golden questions map to overview, grounded, low-coverage, and u
     ...Object.entries(goldenQuestions)
       .filter(([name]) => name !== 'overview')
       .map(([name, assertion]) => ({
+        document: { title: 'Full Stack AI Engineer Assessment', content: assessmentFixtureText },
         name: `${name} question uses grounded RAG routing`,
         question: assertion.question,
         retrievedChunks: supportedChunks,
@@ -823,6 +897,7 @@ test('assessment golden questions map to overview, grounded, low-coverage, and u
       name: 'specific salary question remains low-coverage instead of overview',
       question: assessmentGoldenAssertions.unsupportedQuestions[1].question,
       retrievedChunks: [{ chunkId: 'assessment-overview', normalizedScore: 0.08 }],
+      document: { title: 'Full Stack AI Engineer Assessment', content: assessmentFixtureText },
       expected: { contextStrategy: 'fallback', fallbackReason: 'low_retrieval_coverage', unsupportedReason: null },
     },
     {
@@ -830,6 +905,7 @@ test('assessment golden questions map to overview, grounded, low-coverage, and u
       question: assessmentGoldenAssertions.unsupportedQuestions[0].question,
       retrievedChunks: [],
       expected: { contextStrategy: 'unsupported', fallbackReason: null, unsupportedReason: 'outside_document_scope' },
+      document: { title: 'Full Stack AI Engineer Assessment', content: assessmentFixtureText },
     },
   ];
 
@@ -840,6 +916,7 @@ test('assessment golden questions map to overview, grounded, low-coverage, and u
         retrievalBackend: 'hybrid',
         relevanceThreshold: 0.35,
         retrievedChunks: currentCase.retrievedChunks,
+        document: currentCase.document,
       });
 
       assert.deepEqual(

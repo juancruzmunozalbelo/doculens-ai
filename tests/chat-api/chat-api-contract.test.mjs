@@ -1062,6 +1062,20 @@ test('chat endpoint treats broad assessment requirements and deliverables questi
       providerText: 'The source requests a Git repository, runnable local setup instructions, and a README explaining architecture, AI design, privacy decisions, reliability strategy, deployment approach, and trade-offs.',
       mustMention: ['Git repository', 'runnable local setup instructions', 'README', 'deployment'],
     },
+    {
+      name: 'implicit deliverables expected',
+      question: 'What deliverables are expected?',
+      evidence: 'Deliverables include a Git repository and a README with local run instructions, architecture, AI design, trade-offs, and limitations.',
+      providerText: 'The expected deliverables are a Git repository and a README documenting local run instructions, architecture decisions, AI design choices, trade-offs, limitations, and deployment notes.',
+      mustMention: ['Git repository', 'README', 'local run instructions', 'architecture'],
+    },
+    {
+      name: 'informal backend necessary',
+      question: 'whats backend is necessary?',
+      evidence: 'Backend requirements include a REST API, one LLM endpoint, persistence, authentication with JWT or similar, provider abstraction, and safe prompt handling.',
+      providerText: 'The backend needs a REST API with at least one LLM endpoint, a persistence layer, JWT or similar authentication, an AI provider abstraction, and prompt-injection and unsafe-input protections.',
+      mustMention: ['REST API', 'LLM endpoint', 'persistence', 'JWT', 'provider abstraction'],
+    },
   ];
 
   for (const currentCase of cases) {

@@ -942,6 +942,7 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
       retrievalBackend: retrievalResult?.retrievalBackend,
       retrievedChunks,
       relevanceThreshold: retrievalResult?.scoreSummary?.relevanceThreshold,
+      document,
     });
     if (retrievalResult?.scoreSummary) {
       strategy.retrievalScoreSummary = retrievalResult.scoreSummary;
