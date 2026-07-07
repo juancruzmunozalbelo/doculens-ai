@@ -7,7 +7,10 @@ import {
   createInMemoryUserRepository,
   DocumentAccessError,
 } from './documents/service.mjs';
+import { createPostgreSqlRepositories } from './postgresql/repositories.mjs';
 import { redactSecrets } from './security/redact.mjs';
+
+const MAX_JSON_BODY_BYTES = 1024 * 1024;
 
 function sendJson(response, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -42,16 +45,38 @@ function safeErrorMessage(statusCode) {
   return 'Request failed';
 }
 
-async function readJsonBody(request) {
+async function readJsonBody(request, { maxBytes = MAX_JSON_BODY_BYTES } = {}) {
+  const contentLength = request.headers['content-length'];
+  if (typeof contentLength === 'string' && contentLength.trim() !== '') {
+    const declaredBytes = Number(contentLength);
+    if (!Number.isFinite(declaredBytes) || declaredBytes < 0) {
+      const error = new Error('Invalid Content-Length');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (declaredBytes > maxBytes) {
+      const error = new Error('JSON body is too large');
+      error.statusCode = 413;
+      throw error;
+    }
+  }
+
   const chunks = [];
+  let receivedBytes = 0;
   for await (const chunk of request) {
+    receivedBytes += chunk.length;
+    if (receivedBytes > maxBytes) {
+      const error = new Error('JSON body is too large');
+      error.statusCode = 413;
+      throw error;
+    }
     chunks.push(chunk);
   }
   if (chunks.length === 0) {
     return {};
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return JSON.parse(Buffer.concat(chunks, receivedBytes).toString('utf8'));
   } catch {
     const error = new Error('Invalid JSON body');
     error.statusCode = 400;
@@ -86,15 +111,54 @@ function repositoriesFromFactory(config, repositoryFactory) {
   return repositories;
 }
 
-function defaultRepositories(config, overrides) {
-  if (overrides.repositoryFactory && !overrides.users && !overrides.documentsRepository && !overrides.auth && !overrides.documents) {
-    return repositoriesFromFactory(config, overrides.repositoryFactory);
+function hasRepositoryOverride(overrides) {
+  return Boolean(overrides.users || overrides.documentsRepository || overrides.auth || overrides.documents);
+}
+
+function hasDatabaseUrl(config) {
+  return typeof config?.databaseUrl === 'string' && config.databaseUrl.trim() !== '';
+}
+
+function selectDefaultRepositories(config, overrides) {
+  if (hasRepositoryOverride(overrides)) {
+    return {
+      repositories: {},
+      selection: {
+        kind: 'overrides',
+        databaseUrl: hasDatabaseUrl(config) ? config.databaseUrl : undefined,
+        usesInMemoryRepositories: false,
+      },
+    };
   }
-  return {};
+
+  if (overrides.repositoryFactory || (hasDatabaseUrl(config) && config.nodeEnv !== 'test')) {
+    const factory = overrides.repositoryFactory ?? createPostgreSqlRepositories;
+    const repositories = repositoriesFromFactory(config, factory);
+    return {
+      repositories,
+      selection: {
+        kind: 'postgresql',
+        databaseUrl: config.databaseUrl,
+        usesInMemoryRepositories: false,
+      },
+    };
+  }
+
+  return {
+    repositories: {},
+    selection: {
+      kind: 'in-memory',
+      databaseUrl: hasDatabaseUrl(config) ? config.databaseUrl : undefined,
+      usesInMemoryRepositories: true,
+    },
+  };
 }
 
 function buildServices(config, overrides = {}) {
-  const repositories = defaultRepositories(config, overrides);
+  const { repositories, selection } = selectDefaultRepositories(config, overrides);
+  if (typeof overrides.onRepositorySelection === 'function') {
+    overrides.onRepositorySelection(selection);
+  }
   const users = overrides.users ?? repositories.users ?? createInMemoryUserRepository();
   const documentsRepository = overrides.documentsRepository ?? repositories.documentsRepository ?? createInMemoryDocumentRepository();
   const auth = overrides.auth ?? createAuthService({

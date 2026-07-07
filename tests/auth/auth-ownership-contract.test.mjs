@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
+import net from 'node:net';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -38,6 +39,10 @@ function testConfig() {
       model: 'MiniMax-M3',
     }),
   });
+}
+
+function productionConfig() {
+  return Object.freeze({ ...testConfig(), nodeEnv: 'production' });
 }
 
 function decodeJwtPayload(token) {
@@ -88,6 +93,69 @@ async function requestJson(baseUrl, pathname, { method = 'GET', token, body } = 
     assert.fail(`${method} ${pathname} must return JSON, received: ${text.slice(0, 120)}`);
   }
   return { status: response.status, headers: response.headers, body: parsed };
+}
+
+function parseHttpStatus(responseText) {
+  const match = responseText.match(/^HTTP\/1\.1\s+(\d{3})\b/);
+  assert.ok(match, `raw HTTP response must start with a status line, received: ${responseText.slice(0, 120)}`);
+  return Number(match[1]);
+}
+
+async function requestOversizedDeclaredJsonWithoutBody(baseUrl, pathname, contentLength) {
+  const url = new URL(baseUrl);
+  const requestHead = [
+    `POST ${pathname} HTTP/1.1`,
+    `Host: ${url.hostname}:${url.port}`,
+    'Accept: application/json',
+    'Content-Type: application/json',
+    `Content-Length: ${contentLength}`,
+    'Connection: close',
+    '',
+    '',
+  ].join('\r\n');
+
+  return await new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host: url.hostname, port: Number(url.port) });
+    let responseText = '';
+    let settled = false;
+    const rejectIfBuffered = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      reject(new Error(`server did not reject ${contentLength} declared JSON bytes before the auth body was sent`));
+    }, 1000);
+
+    function settle(callback, value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(rejectIfBuffered);
+      socket.destroy();
+      callback(value);
+    }
+
+    socket.setEncoding('utf8');
+    socket.on('connect', () => {
+      socket.write(requestHead);
+    });
+    socket.on('data', (chunk) => {
+      responseText += chunk;
+      if (/^HTTP\/1\.1\s+\d{3}\b/.test(responseText)) {
+        settle(resolve, parseHttpStatus(responseText));
+      }
+    });
+    socket.on('error', (error) => {
+      settle(reject, error);
+    });
+    socket.on('close', () => {
+      if (!settled) {
+        settle(reject, new Error(`socket closed before an oversized-body response arrived; partial response: ${responseText}`));
+      }
+    });
+  });
 }
 
 async function registerAndLogin(baseUrl, { email, password, displayName }) {
@@ -151,6 +219,51 @@ function deniedDocumentAccess(message = 'Document not found', statusCode = 404) 
   error.statusCode = statusCode;
   return error;
 }
+
+test('production DATABASE_URL server construction selects PostgreSQL repositories without repository overrides', async () => {
+  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const config = productionConfig();
+  const repositorySelections = [];
+
+  createDocuLensServer(config, {
+    onRepositorySelection(selection) {
+      repositorySelections.push(selection);
+    },
+  });
+
+  assert.equal(repositorySelections.length, 1, 'configured production server must report the default repository wiring it selected');
+  assert.equal(
+    repositorySelections[0]?.kind,
+    'postgresql',
+    'DATABASE_URL in a normal configured server must select PostgreSQL repositories instead of in-memory stores',
+  );
+  assert.equal(
+    repositorySelections[0]?.databaseUrl,
+    config.databaseUrl,
+    'PostgreSQL repository selection must be bound to the configured DATABASE_URL without requiring a live database connection',
+  );
+  assert.equal(
+    repositorySelections[0]?.usesInMemoryRepositories,
+    false,
+    'in-memory repositories must be reserved for explicit overrides or test mode',
+  );
+});
+
+test('unauthenticated auth routes reject oversized JSON bodies with 413 before reading body bytes', async () => {
+  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const server = createDocuLensServer(testConfig());
+  const baseUrl = await listen(server);
+  try {
+    const statusCode = await requestOversizedDeclaredJsonWithoutBody(baseUrl, '/api/auth/register', 2 * 1024 * 1024);
+    assert.equal(
+      statusCode,
+      413,
+      'auth endpoints must reject oversized unauthenticated JSON requests before buffering or parsing the body',
+    );
+  } finally {
+    await close(server);
+  }
+});
 
 test('configured DATABASE_URL default server constructs auth and document repositories through the database wiring factory', async () => {
   const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
