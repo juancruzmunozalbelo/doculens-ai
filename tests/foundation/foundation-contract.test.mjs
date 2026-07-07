@@ -90,6 +90,7 @@ test('package scripts expose the foundation development, database, test, eval, a
     ['db:migrate', 'PostgreSQL migration command'],
     ['db:reset', 'PostgreSQL reset command'],
     ['db:seed', 'PostgreSQL demo seed command'],
+    ['demo:seed', 'PostgreSQL demo seed alias'],
     ['test:unit', 'unit test command'],
     ['test:integration', 'integration test command'],
     ['test:e2e', 'Playwright E2E command'],
