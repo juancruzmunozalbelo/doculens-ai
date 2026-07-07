@@ -8,10 +8,22 @@ import {
   DocumentAccessError,
 } from './documents/service.mjs';
 import { createInMemoryChunkRepository } from './ingestion/chunk-repository.mjs';
+import { createMiniMaxProvider, MINIMAX_DEFAULTS } from './ai/minimax-provider.mjs';
+import { createDocumentAiService } from './chat/service.mjs';
+import { createRetrievalProvider } from './retrieval/provider.mjs';
 import { createPostgreSqlRepositories } from './postgresql/repositories.mjs';
 import { redactSecrets } from './security/redact.mjs';
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const DEFAULT_SERVER_MINIMAX_BUDGET = Object.freeze({
+  maxLiveCalls: 32,
+  maxOutputTokens: 800,
+  maxInputTokens: 8_000,
+  maxContextTokens: 8_000,
+  maxRetries: 1,
+  concurrencyLimit: 2,
+  maxEstimatedCostUsd: 1,
+});
 
 function sendJson(response, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -155,6 +167,28 @@ function selectDefaultRepositories(config, overrides) {
   };
 }
 
+function createUnavailableAiProvider() {
+  async function unavailable() {
+    const error = new Error('AI provider is not configured');
+    error.statusCode = 503;
+    throw error;
+  }
+  return { analyzeDocument: unavailable, answerQuestion: unavailable };
+}
+
+function defaultAiProvider(config) {
+  const apiKey = config?.minimax?.apiKey ?? config?.minimaxApiKey;
+  if (config?.aiProvider === 'minimax' && typeof apiKey === 'string' && apiKey.trim() !== '') {
+    return createMiniMaxProvider({
+      apiKey,
+      baseUrl: config?.minimax?.baseUrl ?? MINIMAX_DEFAULTS.baseUrl,
+      model: config?.minimax?.model ?? MINIMAX_DEFAULTS.model,
+      budget: config?.minimax?.budget ?? DEFAULT_SERVER_MINIMAX_BUDGET,
+    });
+  }
+  return createUnavailableAiProvider();
+}
+
 function buildServices(config, overrides = {}) {
   const { repositories, selection } = selectDefaultRepositories(config, overrides);
   if (typeof overrides.onRepositorySelection === 'function') {
@@ -169,7 +203,17 @@ function buildServices(config, overrides = {}) {
     tokenTtlSeconds: config.jwtTokenTtlSeconds ?? 60 * 60,
   });
   const documents = overrides.documents ?? repositories.documents ?? createDocumentService({ documents: documentsRepository, chunks: chunksRepository });
-  return { auth, documents };
+  const aiProvider = overrides.aiProvider ?? defaultAiProvider(config);
+  const retrievalProvider = overrides.retrievalProvider ?? createRetrievalProvider({ chunkRepository: chunksRepository });
+  const documentAi = overrides.documentAi ?? createDocumentAiService({
+    documents,
+    aiProvider,
+    retrievalProvider,
+    analysisRepository: overrides.analysisRepository ?? repositories.analysisRepository,
+    chatRepository: overrides.chatRepository ?? repositories.chatRepository,
+    config,
+  });
+  return { auth, documents, documentAi };
 }
 
 async function handleProtected(request, response, services, handler) {
@@ -279,6 +323,14 @@ export function createDocuLensServer(config, overrides = {}) {
         return;
       }
 
+      if (analysisDocumentId && method === 'POST') {
+        await handleProtected(request, response, services, async (currentUser) => {
+          const result = await services.documentAi.analyzeDocument({ currentUser, documentId: analysisDocumentId });
+          sendJson(response, 201, { analysis: result.analysis });
+        });
+        return;
+      }
+
       const messagesDocumentId = documentIdFromPath(pathname, '/messages');
       if (messagesDocumentId && method === 'GET') {
         await handleProtected(request, response, services, async (currentUser) => {
@@ -319,6 +371,20 @@ export function createDocuLensServer(config, overrides = {}) {
         return;
       }
 
+
+      const chatDocumentId = documentIdFromPath(pathname, '/chat');
+      if (chatDocumentId && method === 'POST') {
+        await handleProtected(request, response, services, async (currentUser) => {
+          const body = await readJsonBody(request);
+          const result = await services.documentAi.answerQuestion({
+            currentUser,
+            documentId: chatDocumentId,
+            question: body.question,
+          });
+          sendJson(response, result.statusCode, { answer: result.answer, retrievedChunks: result.retrievedChunks });
+        });
+        return;
+      }
       const chunksDocumentId = documentIdFromPath(pathname, '/chunks');
       if (chunksDocumentId && method === 'GET') {
         await handleProtected(request, response, services, async (currentUser) => {

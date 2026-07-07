@@ -35,6 +35,7 @@ function citationReadyChunk(row, { backend, backendFallbackReason }) {
     chunkId: row.chunkId ?? row.chunk_id,
     chunkIndex: row.chunkIndex ?? row.chunk_index,
     headingPath: [...(row.headingPath ?? row.heading_path ?? [])],
+    content: row.content,
     contentExcerpt: contentExcerptFor({ content: row.content, contentExcerpt: row.contentExcerpt ?? row.content_excerpt }),
     tokenEstimate: row.tokenEstimate ?? row.token_estimate ?? null,
     normalizedScore: normalizeScore(row.normalizedScore ?? row.normalized_score ?? row.score),
@@ -110,17 +111,17 @@ export function createRetrievalProvider({
   const configuredPreferredBackend = normalizePreferredBackend(preferredBackend);
   const configuredLexicalSearch = lexicalSearch ?? lexicalSearchFromRepository(chunkRepository ?? chunks);
 
-  async function retrieve({ documentId, userId, query, topK } = {}) {
+  async function retrieve({ documentId, userId, query, topK, limit } = {}) {
     requireNonEmptyString(documentId, 'documentId');
     requireNonEmptyString(userId, 'userId');
     requireNonEmptyString(query, 'query');
-    const limit = boundedTopK(topK);
+    const boundedLimit = boundedTopK(topK ?? limit);
 
     if (configuredPreferredBackend === LEXICAL_FALLBACK_BACKEND) {
       if (typeof configuredLexicalSearch !== 'function') {
         throw new Error('lexical fallback search is required when preferredBackend is lexical_fallback');
       }
-      const rows = await configuredLexicalSearch({ documentId, userId, query, limit });
+      const rows = await configuredLexicalSearch({ documentId, userId, query, limit: boundedLimit });
       return rowsToResult({
         rows: [...rows].sort(sortByScoreThenIndex),
         backend: LEXICAL_FALLBACK_BACKEND,
@@ -128,12 +129,12 @@ export function createRetrievalProvider({
         relevanceThreshold,
         documentId,
         userId,
-        limit,
+        limit: boundedLimit,
       });
     }
 
     try {
-      const rows = await runPreferredSearch({ preferredSearch, documentId, userId, query, limit });
+      const rows = await runPreferredSearch({ preferredSearch, documentId, userId, query, limit: boundedLimit });
       return rowsToResult({
         rows,
         backend: configuredPreferredBackend,
@@ -141,7 +142,7 @@ export function createRetrievalProvider({
         relevanceThreshold,
         documentId,
         userId,
-        limit,
+        limit: boundedLimit,
       });
     } catch (error) {
       const backendFallbackReason = retrievalUnavailableReason(error);
@@ -155,7 +156,7 @@ export function createRetrievalProvider({
         throw fallbackError;
       }
 
-      const rows = await configuredLexicalSearch({ documentId, userId, query, limit });
+      const rows = await configuredLexicalSearch({ documentId, userId, query, limit: boundedLimit });
       return rowsToResult({
         rows: [...rows].sort(sortByScoreThenIndex),
         backend: LEXICAL_FALLBACK_BACKEND,
@@ -163,7 +164,7 @@ export function createRetrievalProvider({
         relevanceThreshold,
         documentId,
         userId,
-        limit,
+        limit: boundedLimit,
       });
     }
   }

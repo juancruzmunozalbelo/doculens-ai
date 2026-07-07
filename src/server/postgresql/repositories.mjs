@@ -126,6 +126,48 @@ const chunkJson = `json_build_object(
   'createdAt', c.created_at
 )`;
 
+const analysisJson = `json_build_object(
+  'id', a.id::text,
+  'documentId', a.document_id::text,
+  'summary', a.summary,
+  'entities', a.entities,
+  'obligations', a.obligations,
+  'risks', a.risks,
+  'uncertainties', a.uncertainties,
+  'metadata', jsonb_build_object(
+    'provider', a.provider,
+    'model', a.model,
+    'promptId', a.prompt_id,
+    'promptVersion', a.prompt_version,
+    'contextStrategy', a.context_strategy,
+    'thinkingMode', a.thinking_mode,
+    'tokenEstimate', a.token_estimate,
+    'tokenUsage', jsonb_build_object('input', a.input_tokens, 'output', a.output_tokens)
+  ) || a.provider_metadata,
+  'createdAt', a.created_at
+)`;
+
+const messageJson = `json_build_object(
+  'id', m.id::text,
+  'documentId', m.document_id::text,
+  'userId', m.user_id::text,
+  'role', m.role,
+  'content', m.content,
+  'metadata', m.metadata || jsonb_build_object(
+    'provider', m.provider,
+    'model', m.model,
+    'promptId', m.prompt_id,
+    'promptVersion', m.prompt_version,
+    'contextStrategy', m.context_strategy,
+    'fallbackReason', m.fallback_reason,
+    'retrievalScoreSummary', m.retrieval_score_summary,
+    'retrievedChunkIds', m.retrieved_chunk_ids,
+    'tokenEstimate', m.token_estimate,
+    'tokenUsage', jsonb_build_object('input', m.input_tokens, 'output', m.output_tokens)
+  ),
+  'createdAt', m.created_at
+)`;
+
 export function createPostgreSqlRepositories({ databaseUrl } = {}) {
   if (typeof databaseUrl !== 'string' || databaseUrl.trim() === '') {
     throw new Error('DATABASE_URL is required for PostgreSQL repositories');
@@ -368,5 +410,121 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
     },
   };
 
-  return { users, documentsRepository, chunksRepository };
+  const analysisRepository = {
+    async saveAnalysis({ documentId, userId, analysis, metadata = analysis?.metadata ?? {} }) {
+      await documentsRepository.findByIdForUser({ documentId, userId }).then((document) => {
+        if (!document) {
+          const error = new Error('document not found or forbidden for analysis write');
+          error.statusCode = 404;
+          throw error;
+        }
+      });
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), inserted as (
+           insert into document_analyses (
+             document_id, summary, entities, obligations, risks, uncertainties,
+             provider, model, prompt_id, prompt_version, context_strategy, thinking_mode,
+             input_tokens, output_tokens, token_estimate, provider_metadata
+           )
+           select
+             (data->>'documentId')::uuid,
+             data->'analysis'->>'summary',
+             coalesce(data->'analysis'->'entities', '[]'::jsonb),
+             coalesce(data->'analysis'->'obligations', '[]'::jsonb),
+             coalesce(data->'analysis'->'risks', '[]'::jsonb),
+             coalesce(data->'analysis'->'uncertainties', '[]'::jsonb),
+             data->'metadata'->>'provider',
+             data->'metadata'->>'model',
+             coalesce(data->'metadata'->>'promptId', 'doculens.analysis'),
+             data->'metadata'->>'promptVersion',
+             coalesce(data->'metadata'->>'contextStrategy', 'full_document'),
+             data->'metadata'->>'thinkingMode',
+             nullif(coalesce(data->'metadata'->'tokenUsage'->>'input', data->'metadata'->'tokenEstimate'->>'input'), '')::integer,
+             nullif(coalesce(data->'metadata'->'tokenUsage'->>'output', data->'metadata'->'tokenEstimate'->>'output'), '')::integer,
+             case when jsonb_typeof(data->'metadata'->'tokenEstimate') = 'number' then (data->'metadata'->>'tokenEstimate')::integer else null end,
+             data->'metadata'
+           from input
+           returning *
+         )
+         select ${analysisJson}
+         from inserted a;`,
+        { documentId, userId, analysis, metadata },
+      );
+    },
+  };
+
+  const chatRepository = {
+    async saveMessage({ documentId, userId, answer, citations = [], metadata = answer?.metadata ?? {} }) {
+      await documentsRepository.findByIdForUser({ documentId, userId }).then((document) => {
+        if (!document) {
+          const error = new Error('document not found or forbidden for chat write');
+          error.statusCode = 404;
+          throw error;
+        }
+      });
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), inserted_message as (
+           insert into chat_messages (
+             document_id, user_id, role, content, provider, model, prompt_id, prompt_version,
+             context_strategy, fallback_reason, retrieval_score_summary, retrieved_chunk_ids,
+             token_estimate, input_tokens, output_tokens, metadata
+           )
+           select
+             (data->>'documentId')::uuid,
+             (data->>'userId')::uuid,
+             'assistant',
+             data->'answer'->>'text',
+             data->'metadata'->>'provider',
+             data->'metadata'->>'model',
+             data->'metadata'->>'promptId',
+             data->'metadata'->>'promptVersion',
+             coalesce(data->'metadata'->>'contextStrategy', 'rag'),
+             data->'metadata'->>'fallbackReason',
+             coalesce(data->'metadata'->'retrievalScoreSummary', '{}'::jsonb),
+             coalesce(array(select jsonb_array_elements_text(data->'metadata'->'retrievedChunkIds')), array[]::text[]),
+             case when jsonb_typeof(data->'metadata'->'tokenEstimate') = 'number' then (data->'metadata'->>'tokenEstimate')::integer else null end,
+             nullif(coalesce(data->'metadata'->'tokenUsage'->>'input', data->'metadata'->'tokenEstimate'->>'input'), '')::integer,
+             nullif(coalesce(data->'metadata'->'tokenUsage'->>'output', data->'metadata'->'tokenEstimate'->>'output'), '')::integer,
+             data->'metadata'
+           from input
+           returning *
+         ), citation_input as (
+           select
+             inserted_message.id as message_id,
+             (input.data->>'documentId')::uuid as document_id,
+             citation,
+             ordinality - 1 as citation_index
+           from input
+           join inserted_message on true
+           left join lateral jsonb_array_elements(coalesce(input.data->'citations', '[]'::jsonb)) with ordinality as c(citation, ordinality) on true
+         ), inserted_citations as (
+           insert into message_citations (document_id, message_id, chunk_id, chunk_stable_id, quote, citation_index, metadata)
+           select
+             citation_input.document_id,
+             citation_input.message_id,
+             chunks.id,
+             citation_input.citation->>'chunkId',
+             citation_input.citation->>'quote',
+             citation_input.citation_index,
+             citation_input.citation
+           from citation_input
+           join document_chunks chunks
+             on chunks.document_id = citation_input.document_id
+            and chunks.chunk_id = citation_input.citation->>'chunkId'
+           where citation_input.citation is not null
+           returning true
+         )
+         select ${messageJson}
+         from inserted_message m;`,
+        { documentId, userId, answer, citations, metadata },
+      );
+    },
+  };
+
+  return { users, documentsRepository, chunksRepository, analysisRepository, chatRepository };
+
 }

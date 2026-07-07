@@ -236,24 +236,32 @@ export function createMiniMaxProvider({
     }
   }
 
-  async function answerQuestion({ documentId, userId, question, prompt: promptInput, context = {}, secrets = {} } = {}) {
+  async function answerQuestion({ documentId, userId, question, prompt: promptInput, context = {}, contextStrategy, chunks, document, secrets = {} } = {}) {
     requireNonEmptyString(documentId, 'documentId');
     requireNonEmptyString(userId, 'userId');
-    const prompt = normalizePrompt(promptInput, 'doculens.chat');
+    const prompt = normalizePrompt(promptInput, contextStrategy === 'fallback' || context?.strategy === 'fallback' ? 'doculens.fallback' : 'doculens.chat');
+    const providerContext = {
+      ...context,
+      strategy: context.strategy ?? contextStrategy,
+      chunks: context.chunks ?? chunks,
+      document: context.document ?? document,
+    };
     const messages = buildPromptMessages({
       promptId: prompt.id,
       promptVersion: prompt.version,
       userQuestion: question,
-      chunks: chunksForPrompt(context),
-      contextStrategy: context.strategy,
-      retrievalBackend: context.retrievalBackend,
-      fallbackReason: context.fallbackReason,
+      document: providerContext.strategy === 'fallback' ? providerContext.document : undefined,
+      chunks: chunksForPrompt(providerContext),
+      contextStrategy: providerContext.strategy,
+      retrievalBackend: providerContext.retrievalBackend,
+      fallbackReason: providerContext.fallbackReason,
       secrets: { ...secrets, minimaxApiKey: configuredApiKey },
     });
-    const { parsed, metadata } = await invoke({ prompt, messages, context });
+    const { parsed, metadata } = await invoke({ prompt, messages, context: providerContext });
     return {
       answer: parsed.answer ?? parsed.content ?? '',
       citations: Array.isArray(parsed.citations) ? parsed.citations : [],
+      uncertainty: parsed.uncertainty ?? null,
       metadata,
     };
   }
