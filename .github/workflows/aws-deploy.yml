@@ -266,6 +266,7 @@ jobs:
   terraform_apply:
     name: AWS Terraform Apply
     needs: terraform_plan
+    if: ${{ !cancelled() && needs.terraform_plan.result == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: aws-demo
