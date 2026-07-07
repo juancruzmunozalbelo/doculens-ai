@@ -42,8 +42,10 @@ async function installRecordingPsqlFake(t) {
   await writeFile(
     psqlPath,
     `#!/usr/bin/env node
-const { writeFileSync } = require('node:fs');
-writeFileSync(${JSON.stringify(argvPath)}, JSON.stringify(process.argv.slice(2)), 'utf8');
+const { existsSync, readFileSync, writeFileSync } = require('node:fs');
+const recorded = existsSync(${JSON.stringify(argvPath)}) ? JSON.parse(readFileSync(${JSON.stringify(argvPath)}, 'utf8')) : [];
+recorded.push(process.argv.slice(2));
+writeFileSync(${JSON.stringify(argvPath)}, JSON.stringify(recorded), 'utf8');
 process.stdout.write('null\\n');
 `,
     { mode: 0o755 },
@@ -51,7 +53,7 @@ process.stdout.write('null\\n');
   process.env.PATH = originalPath ? `${temporaryDirectory}${path.delimiter}${originalPath}` : temporaryDirectory;
 
   return {
-    async readSpawnedArgs() {
+    async readSpawnedArgvInvocations() {
       return JSON.parse(await readFile(argvPath, 'utf8'));
     },
   };
@@ -279,7 +281,7 @@ test('production DATABASE_URL server construction selects PostgreSQL repositorie
   );
 });
 
-test('PostgreSQL query helper keeps DATABASE_URL credentials out of spawned psql argv', async (t) => {
+test('PostgreSQL query helper keeps DATABASE_URL credentials and query payloads out of spawned psql argv', async (t) => {
   const createPostgreSqlRepositories = await importRequired(
     'src/server/postgresql/repositories.mjs',
     ['createPostgreSqlRepositories'],
@@ -288,20 +290,61 @@ test('PostgreSQL query helper keeps DATABASE_URL credentials out of spawned psql
   const psql = await installRecordingPsqlFake(t);
   const databasePassword = 'argv_password_canary_for_regression';
   const databaseUrl = `postgresql://argv_user:${databasePassword}@127.0.0.1:5432/doculens_argv_canary`;
+  const userPayload = Object.freeze({
+    email: 'argv-canary@example.test',
+    passwordHash: 'argv_password_hash_canary_for_regression',
+    displayName: 'Argv Canary',
+  });
+  const documentPayload = Object.freeze({
+    userId: '00000000-0000-4000-8000-000000000001',
+    title: 'Argv Canary Document',
+    content: 'argv_document_content_canary_for_regression',
+  });
 
   const repositories = createPostgreSqlRepositories({ databaseUrl });
-  await repositories.users.findByEmail('argv-canary@example.test');
-
-  const spawnedArgs = await psql.readSpawnedArgs();
-  assert.equal(
-    spawnedArgs.includes(databaseUrl),
-    false,
-    'psql argv must not include the full DATABASE_URL because process listings expose argv to other users',
+  await assert.rejects(
+    () => repositories.users.createUser(userPayload),
+    /User already exists/,
+    'fake psql returns null, but the create-user query must still spawn with the password hash payload',
   );
-  assert.equal(
-    spawnedArgs.some((arg) => String(arg).includes(databasePassword)),
-    false,
-    'psql argv must not include the database password canary in any argument',
+  await repositories.documentsRepository.createForUser(documentPayload);
+
+  const spawnedArgvInvocations = await psql.readSpawnedArgvInvocations();
+  const spawnedArgs = spawnedArgvInvocations.flatMap((args) => args.map(String));
+  const encodedUserPayload = Buffer.from(JSON.stringify(userPayload), 'utf8').toString('base64');
+  const decodedPayloadArgs = spawnedArgs
+    .filter((arg) => arg.startsWith('payload='))
+    .map((arg) => Buffer.from(arg.slice('payload='.length), 'base64').toString('utf8'));
+  const argvContains = (needle) => spawnedArgs.some((arg) => arg.includes(needle));
+  const decodedArgContains = (needle) => decodedPayloadArgs.some((arg) => arg.includes(needle));
+  const leaks = [];
+
+  if (argvContains(databaseUrl)) {
+    leaks.push('full DATABASE_URL');
+  }
+  if (argvContains(databasePassword)) {
+    leaks.push('database password canary');
+  }
+  if (argvContains(userPayload.passwordHash)) {
+    leaks.push('raw password hash canary');
+  }
+  if (argvContains(documentPayload.content)) {
+    leaks.push('raw document content canary');
+  }
+  if (argvContains(encodedUserPayload)) {
+    leaks.push('base64 user payload containing password hash');
+  }
+  if (decodedArgContains(userPayload.passwordHash)) {
+    leaks.push('base64-decodable password hash payload');
+  }
+  if (decodedArgContains(documentPayload.content)) {
+    leaks.push('base64-decodable document content payload');
+  }
+
+  assert.deepEqual(
+    leaks,
+    [],
+    'psql argv must not expose database credentials, password hashes, or document content canaries',
   );
 });
 

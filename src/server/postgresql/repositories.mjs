@@ -56,15 +56,13 @@ async function queryJson({ databaseUrl, sql, payload }) {
     '--quiet',
     '--set',
     'ON_ERROR_STOP=1',
-    '--set',
-    `payload=${payloadVariable(payload)}`,
-    '--command',
-    sql,
   ];
+  const script = `\\set payload '${payloadVariable(payload)}'\n${sql}\n`;
   const env = psqlEnvironment(databaseUrl);
 
   return await new Promise((resolve, reject) => {
-    const child = spawn('psql', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('psql', args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stdin.end(script);
     let stdout = '';
     let stderr = '';
 
