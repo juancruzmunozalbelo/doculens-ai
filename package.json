@@ -9,11 +9,12 @@
     "db:migrate": "node scripts/db/migrate.mjs",
     "db:reset": "node scripts/db/reset.mjs",
     "db:seed": "node scripts/db/seed.mjs",
-    "test:unit": "node --test tests/foundation/foundation-contract.test.mjs",
+    "test:unit": "node scripts/checks/unit-contract.mjs",
     "test:integration": "node scripts/checks/integration-contract.mjs",
     "test:e2e": "playwright test --reporter=list",
     "smoke:markitdown": "node scripts/checks/markitdown-contract.mjs",
     "eval": "node scripts/checks/eval-contract.mjs",
+    "test:eval": "node --test tests/eval/*.test.mjs",
     "smoke:minimax": "node scripts/checks/minimax-live-smoke.mjs",
     "verify": "node --test scripts/guardrails/check-tdd.test.mjs && node --test tests/foundation/foundation-contract.test.mjs",
     "guard:tdd": "node scripts/guardrails/check-tdd.mjs --staged"
