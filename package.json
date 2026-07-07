@@ -10,6 +10,7 @@
     "db:migrate": "node scripts/db/migrate.mjs",
     "db:reset": "node scripts/db/reset.mjs",
     "db:seed": "node scripts/db/seed.mjs",
+    "demo:seed": "npm run db:seed",
     "test:unit": "node scripts/checks/unit-contract.mjs",
     "test:integration": "node scripts/checks/integration-contract.mjs",
     "test:e2e": "playwright test --reporter=list",
