@@ -11,12 +11,12 @@
 
 ## 2. Authentication and Ownership
 
-- [ ] 2.1 Implement user registration and login with hashed passwords and expiring JWTs
-- [ ] 2.2 Add authenticated middleware and current-user context for backend routes
-- [ ] 2.3 Implement owner-scoped document create, list, read, and delete endpoints
-- [ ] 2.4 Ensure document CRUD queries include both resource ID and current user ID
-- [ ] 2.5 Ensure analysis, chat/message, retrieved chunk, citation, and delete/cascade queries authorize through parent document ownership
-- [ ] 2.6 Add seeded demo user, second authz-test user, seeded NDA document, and adversarial prompt-injection document section
+- [x] 2.1 Implement user registration and login with hashed passwords and expiring JWTs
+- [x] 2.2 Add authenticated middleware and current-user context for backend routes
+- [x] 2.3 Implement owner-scoped document create, list, read, and delete endpoints
+- [x] 2.4 Ensure document CRUD queries include both resource ID and current user ID
+- [x] 2.5 Ensure analysis, chat/message, retrieved chunk, citation, and delete/cascade queries authorize through parent document ownership
+- [x] 2.6 Add seeded demo user, second authz-test user, seeded NDA document, and adversarial prompt-injection document section
 
 ## 3. Ingestion, Chunking, Retrieval, and Fallback
 
