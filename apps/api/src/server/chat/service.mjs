@@ -610,6 +610,7 @@ function buildDisplayState({ metadata, strategy, citations, document, secrets })
   const topScore = Number(scoreSummary?.topScore ?? scoreSummary?.maxScore ?? 0);
   const relevanceThreshold = scoreSummary?.relevanceThreshold ?? null;
   const citationCount = asArray(citations).length;
+  const topicMatchedChunks = strategy.topicMatchedChunks === true || metadata?.topicMatchedChunks === true;
   const suggestions = refinementSuggestionsFor({ document, strategy, secrets });
 
   if (strategy.contextStrategy === 'unsupported') {
@@ -652,7 +653,7 @@ function buildDisplayState({ metadata, strategy, citations, document, secrets })
     };
   }
 
-  if (citationCount === 0 || passingChunks <= 0 || topScore <= 0) {
+  if (citationCount === 0 || (passingChunks <= 0 && !topicMatchedChunks) || topScore <= 0) {
     return {
       kind: 'insufficient_evidence',
       label: DISPLAY_COPY.insufficient_evidence.label,

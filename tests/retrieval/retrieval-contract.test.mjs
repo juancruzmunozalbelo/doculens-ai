@@ -735,20 +735,26 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       },
     },
     {
-      name: 'informal backend question uses source document topic fallback when retrieval is weak',
+      name: 'informal backend question uses RAG when returned chunks contain the document topic',
       input: {
         question: 'whats backend is necessary?',
         retrievalBackend: 'hybrid',
         relevanceThreshold: 0.55,
         retrievedChunks: [
-          { chunkId: 'assessment-overview', normalizedScore: 0.12 },
+          {
+            chunkId: 'assessment-backend',
+            normalizedScore: 0.12,
+            headingPath: ['Full Stack AI Engineer Assessment', 'Backend requirements'],
+            content: 'Backend requirements include a REST API, one LLM endpoint, persistence, JWT authentication, and provider abstraction.',
+          },
         ],
         document: { title: 'Full Stack AI Engineer Assessment', content: assessmentFixtureText },
       },
       expected: {
-        contextStrategy: 'fallback',
-        fallbackReason: 'global_question',
+        contextStrategy: 'rag',
+        fallbackReason: null,
         unsupportedReason: null,
+        topicMatchedChunks: true,
         retrievalBackend: 'hybrid',
         retrievalScoreSummary: {
           maxScore: 0.12,

@@ -1068,6 +1068,8 @@ test('chat endpoint treats broad assessment requirements and deliverables questi
       evidence: 'Deliverables include a Git repository and a README with local run instructions, architecture, AI design, trade-offs, and limitations.',
       providerText: 'The expected deliverables are a Git repository and a README documenting local run instructions, architecture decisions, AI design choices, trade-offs, limitations, and deployment notes.',
       mustMention: ['Git repository', 'README', 'local run instructions', 'architecture'],
+      expectedStrategy: 'rag',
+      expectedDisplayState: 'grounded',
     },
     {
       name: 'informal backend necessary',
@@ -1075,6 +1077,8 @@ test('chat endpoint treats broad assessment requirements and deliverables questi
       evidence: 'Backend requirements include a REST API, one LLM endpoint, persistence, authentication with JWT or similar, provider abstraction, and safe prompt handling.',
       providerText: 'The backend needs a REST API with at least one LLM endpoint, a persistence layer, JWT or similar authentication, an AI provider abstraction, and prompt-injection and unsafe-input protections.',
       mustMention: ['REST API', 'LLM endpoint', 'persistence', 'JWT', 'provider abstraction'],
+      expectedStrategy: 'rag',
+      expectedDisplayState: 'grounded',
     },
   ];
 
@@ -1093,17 +1097,19 @@ test('chat endpoint treats broad assessment requirements and deliverables questi
         }],
         scoreSummary: { topScore: 0.16, averageScore: 0.16, passingChunks: 0, relevanceThreshold: 0.35 },
       });
+      const expectedStrategy = currentCase.expectedStrategy ?? 'fallback';
+      const chunkId = `assessment-${currentCase.name.replace(/\s+/g, '-')}`;
       const aiProvider = createAiProviderFake({
         chatResult: {
           text: currentCase.providerText,
-          citations: [],
+          citations: expectedStrategy === 'rag' ? [{ chunkId, quote: currentCase.evidence }] : [],
           uncertainty: 'medium',
           metadata: {
             provider: 'minimax',
             model: 'MiniMax-M3',
-            promptId: 'doculens.fallback',
+            promptId: expectedStrategy === 'rag' ? 'doculens.chat' : 'doculens.fallback',
             promptVersion: '2026-07-07.1',
-            contextStrategy: 'fallback',
+            contextStrategy: expectedStrategy,
           },
         },
       });
@@ -1121,10 +1127,11 @@ test('chat endpoint treats broad assessment requirements and deliverables questi
 
       assert.equal(response.status, 201, `${currentCase.name} source-summary question should create an answer`);
       assert.equal(aiProvider.answerCalls.length, 1, `${currentCase.name} source-summary question should invoke provider with source context`);
-      assert.equal(aiProvider.answerCalls[0].contextStrategy, 'fallback', `${currentCase.name} should use source-wide fallback context rather than citation-gated RAG`);
-      assert.equal(response.body.answer.displayState.kind, 'full_document_overview', `${currentCase.name} must not be downgraded to insufficient evidence when asking for source-level content`);
-      assert.equal(response.body.answer.metadata.fallbackReason, 'global_question', `${currentCase.name} must be classified as a source-summary/global question`);
-      assert.deepEqual(response.body.answer.citations, [], `${currentCase.name} source-summary answer must not fabricate precise citations`);
+      const expectedDisplayState = currentCase.expectedDisplayState ?? 'full_document_overview';
+      assert.equal(aiProvider.answerCalls[0].contextStrategy, expectedStrategy, `${currentCase.name} should use the expected retrieval strategy`);
+      assert.equal(response.body.answer.displayState.kind, expectedDisplayState, `${currentCase.name} must use the expected answer display state`);
+      assert.equal(response.body.answer.metadata.fallbackReason ?? null, expectedStrategy === 'fallback' ? 'global_question' : null, `${currentCase.name} fallback reason must match strategy`);
+      assert.equal(response.body.answer.citations.length, expectedStrategy === 'rag' ? 1 : 0, `${currentCase.name} citation count must match strategy`);
       for (const term of currentCase.mustMention) {
         assert.match(visibleAnswerSurface(response.body.answer), new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${currentCase.name} answer must mention ${term}`);
       }

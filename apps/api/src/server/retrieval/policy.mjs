@@ -102,23 +102,30 @@ function topicTerms(question) {
   return lexicalTerms(question).filter((term) => !TOPIC_STOPWORDS.has(term));
 }
 
+function textFromValues(values) {
+  return values.filter((value) => typeof value === 'string' && value.trim() !== '').join('\n');
+}
+
+function textForRetrievedChunks(retrievedChunks = []) {
+  return textFromValues(retrievedChunks.flatMap((chunk) => [
+    chunk?.content,
+    chunk?.contentExcerpt,
+    Array.isArray(chunk?.headingPath) ? chunk.headingPath.join(' ') : chunk?.headingPath,
+  ]));
+}
+
 function textForDocumentMatch({ document, retrievedChunks = [] } = {}) {
-  const documentText = [
+  return textFromValues([
     document?.title,
     document?.content,
     document?.text,
     document?.summary,
     document?.description,
-    ...retrievedChunks.flatMap((chunk) => [
-      chunk?.content,
-      chunk?.contentExcerpt,
-      Array.isArray(chunk?.headingPath) ? chunk.headingPath.join(' ') : chunk?.headingPath,
-    ]),
-  ];
-  return documentText.filter((value) => typeof value === 'string' && value.trim() !== '').join('\n');
+    textForRetrievedChunks(retrievedChunks),
+  ]);
 }
 
-function documentContainsQuestionTopic({ question, document, retrievedChunks }) {
+function textContainsQuestionTopic({ question, text }) {
   if (!isQuestionLike(question)) {
     return false;
   }
@@ -126,8 +133,16 @@ function documentContainsQuestionTopic({ question, document, retrievedChunks }) 
   if (topics.length === 0) {
     return false;
   }
-  const documentTerms = new Set(lexicalTerms(textForDocumentMatch({ document, retrievedChunks })));
-  return topics.some((term) => documentTerms.has(term));
+  const terms = new Set(lexicalTerms(text));
+  return topics.some((term) => terms.has(term));
+}
+
+function retrievedChunksContainQuestionTopic({ question, retrievedChunks }) {
+  return textContainsQuestionTopic({ question, text: textForRetrievedChunks(retrievedChunks) });
+}
+
+function documentContainsQuestionTopic({ question, document, retrievedChunks }) {
+  return textContainsQuestionTopic({ question, text: textForDocumentMatch({ document, retrievedChunks }) });
 }
 
 function isExplicitSourceQuestion(question) {
@@ -178,6 +193,17 @@ export function decideRetrievalStrategy({
       fallbackReason: null,
       unsupportedReason: null,
       retrievalBackend,
+      retrievalScoreSummary,
+    };
+  }
+
+  if (retrievedChunksContainQuestionTopic({ question, retrievedChunks })) {
+    return {
+      contextStrategy: 'rag',
+      fallbackReason: null,
+      unsupportedReason: null,
+      retrievalBackend,
+      topicMatchedChunks: true,
       retrievalScoreSummary,
     };
   }
