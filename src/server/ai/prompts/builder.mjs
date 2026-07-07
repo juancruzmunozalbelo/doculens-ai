@@ -9,7 +9,10 @@ function cleanOneLine(value) {
 }
 
 function safeEvidenceText(value, secrets) {
-  return redactSecrets(String(value ?? ''), secrets);
+  return redactSecrets(String(value ?? ''), secrets)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function xmlAttribute(value) {
