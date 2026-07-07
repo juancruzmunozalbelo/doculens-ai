@@ -85,9 +85,9 @@
 
 ## 8. MarkItDown and Documentation
 
-- [ ] 8.1 Add MarkItDown PDF conversion script for sample PDF to Markdown conversion
-- [ ] 8.2 Add sample PDF or documented sample path and generated Markdown workflow
-- [ ] 8.3 Add MarkItDown smoke command that converts the sample PDF and verifies converted Markdown creates chunks
+- [x] 8.1 Add MarkItDown PDF conversion script for sample PDF to Markdown conversion
+- [x] 8.2 Add sample PDF or documented sample path and generated Markdown workflow
+- [x] 8.3 Add MarkItDown smoke command that converts the sample PDF and verifies converted Markdown creates chunks
 - [ ] 8.4 Document local quick start, PostgreSQL setup, demo seed, eval, and MiniMax configuration
 - [ ] 8.5 Document architecture, RAG design, fallback policy, MiniMax M3 design, prompt-injection rules, citation validation, and unsupported-answer behavior
 - [ ] 8.6 Document canonical Playwright `data-testid` matrix
