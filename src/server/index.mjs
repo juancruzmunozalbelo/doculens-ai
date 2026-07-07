@@ -7,6 +7,7 @@ import {
   createInMemoryUserRepository,
   DocumentAccessError,
 } from './documents/service.mjs';
+import { createInMemoryChunkRepository } from './ingestion/chunk-repository.mjs';
 import { createPostgreSqlRepositories } from './postgresql/repositories.mjs';
 import { redactSecrets } from './security/redact.mjs';
 
@@ -112,7 +113,7 @@ function repositoriesFromFactory(config, repositoryFactory) {
 }
 
 function hasRepositoryOverride(overrides) {
-  return Boolean(overrides.users || overrides.documentsRepository || overrides.auth || overrides.documents);
+  return Boolean(overrides.users || overrides.documentsRepository || overrides.chunksRepository || overrides.auth || overrides.documents);
 }
 
 function hasDatabaseUrl(config) {
@@ -161,12 +162,13 @@ function buildServices(config, overrides = {}) {
   }
   const users = overrides.users ?? repositories.users ?? createInMemoryUserRepository();
   const documentsRepository = overrides.documentsRepository ?? repositories.documentsRepository ?? createInMemoryDocumentRepository();
+  const chunksRepository = overrides.chunksRepository ?? repositories.chunksRepository ?? createInMemoryChunkRepository({ documents: documentsRepository });
   const auth = overrides.auth ?? createAuthService({
     users,
     jwtSecret: config.jwtSecret,
     tokenTtlSeconds: config.jwtTokenTtlSeconds ?? 60 * 60,
   });
-  const documents = overrides.documents ?? repositories.documents ?? createDocumentService({ documents: documentsRepository });
+  const documents = overrides.documents ?? repositories.documents ?? createDocumentService({ documents: documentsRepository, chunks: chunksRepository });
   return { auth, documents };
 }
 

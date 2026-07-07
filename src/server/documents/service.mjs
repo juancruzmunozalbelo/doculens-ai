@@ -1,4 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { normalizeDocumentText } from '../ingestion/normalization.mjs';
+import { chunkDocument } from '../ingestion/chunking.mjs';
 
 export class DocumentAccessError extends Error {
   constructor(message = 'Document not found', statusCode = 404) {
@@ -95,11 +97,11 @@ export function createInMemoryDocumentRepository(initialDocuments = []) {
   }
 
   function visible(document) {
-    return document && !document.deletedAt && !document.deleted_at;
+    return document && !document.deletedAt && !document.deleted_at && document.status !== 'failed';
   }
 
   return {
-    async createForUser({ userId, title, content }) {
+    async createForUser({ userId, title, content, status = 'ready' }) {
       const now = new Date().toISOString();
       const row = {
         id: randomUUID(),
@@ -107,7 +109,7 @@ export function createInMemoryDocumentRepository(initialDocuments = []) {
         title,
         content,
         sourceType: 'markdown',
-        status: 'ready',
+        status,
         contentSha256: contentSha256(content),
         tokenEstimate: content.split(/\s+/).filter(Boolean).length,
         metadata: {},
@@ -132,21 +134,84 @@ export function createInMemoryDocumentRepository(initialDocuments = []) {
       documents.delete(documentId);
       return true;
     },
+    async markFailedForUser({ documentId, userId, reason }) {
+      const document = documents.get(documentId);
+      if (!visible(document) || document.userId !== userId) {
+        return null;
+      }
+      document.status = 'failed';
+      document.failureReason = String(reason ?? 'ingestion failed');
+      document.updatedAt = new Date().toISOString();
+      return document;
+    },
   };
 }
 
-export function createDocumentService({ documents } = {}) {
+export function createDocumentService({ documents, chunks, ingestion = {} } = {}) {
   if (!documents) {
     throw new Error('documents repository is required');
   }
 
+  const normalize = ingestion.normalize ?? normalizeDocumentText;
+  const chunk = ingestion.chunk ?? chunkDocument;
+
+  function publicChunk(row) {
+    const content = row.content ?? '';
+    return {
+      id: row.id,
+      documentId: row.documentId ?? row.document_id,
+      chunkId: row.chunkId ?? row.chunk_id,
+      headingPath: row.headingPath ?? row.heading_path ?? [],
+      chunkIndex: row.chunkIndex ?? row.chunk_index,
+      tokenEstimate: row.tokenEstimate ?? row.token_estimate ?? 0,
+      contentExcerpt: content.length > 240 ? `${content.slice(0, 237)}...` : content,
+      retrievalMetadata: row.retrievalMetadata ?? row.retrieval_metadata ?? {},
+      createdAt: row.createdAt ?? row.created_at,
+    };
+  }
+
   async function createDocument({ currentUser, title, content }) {
     const user = requireCurrentUser(currentUser);
+    const normalizedContent = normalize(requireText(content, 'content'));
+    if (normalizedContent === '') {
+      const error = new Error('content is required');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const created = await documents.createForUser({
       userId: user.id,
       title: requireText(title, 'title'),
-      content: requireText(content, 'content'),
+      content: normalizedContent,
     });
+
+    if (!chunks) {
+      return publicDocument(created);
+    }
+
+    try {
+      const createdChunks = chunk({ documentId: created.id, content: normalizedContent });
+      await chunks.createManyForDocument({
+        documentId: created.id,
+        userId: user.id,
+        chunks: createdChunks,
+      });
+    } catch (error) {
+      if (typeof chunks.deleteForDocument === 'function') {
+        await chunks.deleteForDocument({ documentId: created.id });
+      }
+      if (typeof documents.markFailedForUser === 'function') {
+        await documents.markFailedForUser({
+          documentId: created.id,
+          userId: user.id,
+          reason: error.message,
+        });
+      } else if (typeof documents.deleteByIdForUser === 'function') {
+        await documents.deleteByIdForUser({ documentId: created.id, userId: user.id });
+      }
+      throw error;
+    }
+
     return publicDocument(created);
   }
 
@@ -195,8 +260,15 @@ export function createDocumentService({ documents } = {}) {
   }
 
   async function listChunks({ currentUser, documentId }) {
-    await authorizeDocumentChildResource({ currentUser, documentId, resourceType: 'chunk', action: 'read' });
-    return [];
+    const authorization = await authorizeDocumentChildResource({ currentUser, documentId, resourceType: 'chunk', action: 'read' });
+    if (!chunks || typeof chunks.listForDocumentForUser !== 'function') {
+      return [];
+    }
+    const rows = await chunks.listForDocumentForUser({
+      documentId: authorization.documentId,
+      userId: authorization.userId,
+    });
+    return rows.map(publicChunk);
   }
 
   async function listCitations({ currentUser, documentId }) {

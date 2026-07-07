@@ -113,6 +113,19 @@ const documentJson = `json_build_object(
   'updatedAt', updated_at
 )`;
 
+const chunkJson = `json_build_object(
+  'id', c.id::text,
+  'documentId', c.document_id::text,
+  'userId', d.user_id::text,
+  'chunkId', c.chunk_id,
+  'chunkIndex', c.chunk_index,
+  'headingPath', c.heading_path,
+  'content', c.content,
+  'tokenEstimate', c.token_estimate,
+  'retrievalMetadata', c.retrieval_metadata,
+  'createdAt', c.created_at
+)`;
+
 export function createPostgreSqlRepositories({ databaseUrl } = {}) {
   if (typeof databaseUrl !== 'string' || databaseUrl.trim() === '') {
     throw new Error('DATABASE_URL is required for PostgreSQL repositories');
@@ -171,16 +184,17 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
   };
 
   const documentsRepository = {
-    async createForUser({ userId, title, content }) {
+    async createForUser({ userId, title, content, status = 'ready' }) {
       return await query(
         `with input as (
            select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
          )
-         insert into documents (user_id, title, content, content_sha256, token_estimate, metadata)
+         insert into documents (user_id, title, content, status, content_sha256, token_estimate, metadata)
          select
            (data->>'userId')::uuid,
            data->>'title',
            data->>'content',
+           data->>'status',
            data->>'contentSha256',
            (data->>'tokenEstimate')::integer,
            '{}'::jsonb
@@ -190,6 +204,7 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
           userId,
           title,
           content,
+          status,
           contentSha256: contentSha256(content),
           tokenEstimate: tokenEstimate(content),
         },
@@ -203,6 +218,7 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
          select coalesce(json_agg(${documentJson} order by created_at desc), '[]'::json)
          from documents, input
          where user_id = (input.data->>'userId')::uuid
+           and status <> 'failed'
            and deleted_at is null;`,
         { userId },
       );
@@ -217,7 +233,8 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
            from documents, input
            where id = (input.data->>'documentId')::uuid
              and user_id = (input.data->>'userId')::uuid
-             and deleted_at is null
+            and status <> 'failed'
+            and deleted_at is null
          ), 'null'::json);`,
         { documentId, userId },
       );
@@ -240,7 +257,116 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
       );
       return row === true;
     },
+    async markFailedForUser({ documentId, userId, reason }) {
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), updated as (
+           update documents
+           set status = 'failed',
+               metadata = jsonb_set(metadata, '{failureReason}', to_jsonb(data->>'reason'), true),
+               updated_at = now()
+           from input
+           where id = (input.data->>'documentId')::uuid
+             and user_id = (input.data->>'userId')::uuid
+             and deleted_at is null
+           returning ${documentJson} as document
+         )
+         select coalesce((select document from updated), 'null'::json);`,
+        { documentId, userId, reason },
+      );
+    },
   };
 
-  return { users, documentsRepository };
+  const chunksRepository = {
+    async createManyForDocument({ documentId, userId, chunks }) {
+      if (!Array.isArray(chunks)) {
+        throw new Error('chunks must be an array');
+      }
+      const seen = new Set();
+      for (const chunk of chunks) {
+        if (typeof chunk.chunkId !== 'string' || chunk.chunkId.trim() === '') {
+          throw new Error('chunkId is required');
+        }
+        if (seen.has(chunk.chunkId)) {
+          const error = new Error(`duplicate chunk id ${chunk.chunkId} for document ${documentId}`);
+          error.statusCode = 409;
+          throw error;
+        }
+        seen.add(chunk.chunkId);
+      }
+
+      const authorized = await documentsRepository.findByIdForUser({ documentId, userId });
+      if (!authorized) {
+        const error = new Error('document not found or forbidden for chunk write');
+        error.statusCode = 404;
+        throw error;
+      }
+      if (chunks.length === 0) {
+        return [];
+      }
+
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), chunk_input as (
+           select
+             (data->>'documentId')::uuid as document_id,
+             jsonb_array_elements(data->'chunks') as chunk
+           from input
+         ), inserted as (
+           insert into document_chunks (document_id, chunk_id, chunk_index, heading_path, content, content_sha256, token_estimate, retrieval_metadata)
+           select
+             chunk_input.document_id,
+             chunk->>'chunkId',
+             (chunk->>'chunkIndex')::integer,
+             coalesce(array(select jsonb_array_elements_text(chunk->'headingPath')), array[]::text[]),
+             chunk->>'content',
+             encode(digest(chunk->>'content', 'sha256'), 'hex'),
+             (chunk->>'tokenEstimate')::integer,
+             coalesce(chunk->'retrievalMetadata', '{}'::jsonb)
+           from chunk_input
+           returning *
+         )
+         select coalesce(json_agg(${chunkJson} order by c.chunk_index), '[]'::json)
+         from inserted c
+         join documents d on d.id = c.document_id;`,
+        { documentId, chunks },
+      );
+    },
+
+    async listForDocumentForUser({ documentId, userId }) {
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         )
+         select coalesce(json_agg(${chunkJson} order by c.chunk_index), '[]'::json)
+         from document_chunks c
+         join documents d on d.id = c.document_id
+         join input on true
+         where c.document_id = (input.data->>'documentId')::uuid
+           and d.user_id = (input.data->>'userId')::uuid
+           and d.status <> 'failed'
+           and d.deleted_at is null;`,
+        { documentId, userId },
+      );
+    },
+
+    async deleteForDocument({ documentId }) {
+      await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), deleted as (
+           delete from document_chunks
+           using input
+           where document_id = (input.data->>'documentId')::uuid
+           returning true
+         )
+         select to_json(coalesce((select bool_or(true) from deleted), false));`,
+        { documentId },
+      );
+    },
+  };
+
+  return { users, documentsRepository, chunksRepository };
 }
