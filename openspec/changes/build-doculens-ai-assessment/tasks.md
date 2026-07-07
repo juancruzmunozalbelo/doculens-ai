@@ -23,11 +23,11 @@
 - [x] 3.1 Implement Markdown/text normalization for submitted document content
 - [x] 3.2 Implement section-aware chunking with stable chunk IDs, heading paths, chunk indexes, and token estimates
 - [x] 3.3 Persist chunks linked to owner-scoped documents in PostgreSQL
-- [ ] 3.4 Define `RetrievalProvider` and retrieved chunk response shape with retrieval backend metadata
+- [x] 3.4 Define `RetrievalProvider` and retrieved chunk response shape with retrieval backend metadata
 - [ ] 3.5 Implement pgvector or hybrid retrieval as the preferred target, including embedding generation/storage path when provider credentials are available
-- [ ] 3.6 Implement lexical retrieval only as a labeled `lexical_fallback` if the embedding provider blocks implementation or credentials
-- [ ] 3.7 Define deterministic retrieval coverage policy with relevance threshold, low-coverage reason, global-question trigger, and retrieval backend label
-- [ ] 3.8 Implement fallback decision function returning `rag`, `fallback`, or `unsupported` with fallback reason and retrieval score summary
+- [x] 3.6 Implement lexical retrieval only as a labeled `lexical_fallback` if the embedding provider blocks implementation or credentials
+- [x] 3.7 Define deterministic retrieval coverage policy with relevance threshold, low-coverage reason, global-question trigger, and retrieval backend label
+- [x] 3.8 Implement fallback decision function returning `rag`, `fallback`, or `unsupported` with fallback reason and retrieval score summary
 - [ ] 3.9 Expose retrieved chunks, retrieval backend, context strategy, fallback reason, and retrieval score summary through chat response and UI metadata
 
 ## 4. AI Provider and Prompting
