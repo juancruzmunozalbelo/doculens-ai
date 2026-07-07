@@ -220,10 +220,10 @@ export function createMiniMaxProvider({
       },
     };
 
+    configuredBudget.usedLiveCalls += 1;
     configuredBudget.activeCalls += 1;
     try {
       const providerResponse = await transport(request);
-      configuredBudget.usedLiveCalls += 1;
       const parsed = parseJsonContent(responseContent(providerResponse));
       return {
         parsed,

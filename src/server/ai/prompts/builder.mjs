@@ -15,8 +15,8 @@ function safeEvidenceText(value, secrets) {
     .replace(/>/g, '&gt;');
 }
 
-function xmlAttribute(value) {
-  return cleanOneLine(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+function xmlAttribute(value, secrets) {
+  return redactSecrets(cleanOneLine(value), secrets).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function formatHeadingPath(headingPath) {
@@ -39,14 +39,14 @@ function buildDocumentBlock(document, secrets) {
   if (!document?.text) {
     return null;
   }
-  const documentId = xmlAttribute(document.id ?? 'document');
-  const title = xmlAttribute(document.title ?? 'Untitled document');
+  const documentId = xmlAttribute(document.id ?? 'document', secrets);
+  const title = xmlAttribute(document.title ?? 'Untitled document', secrets);
   return `<untrusted_document id="${documentId}" title="${title}">\n${safeEvidenceText(document.text, secrets)}\n</untrusted_document>`;
 }
 
 function buildChunkBlock(chunk, secrets) {
-  const chunkId = xmlAttribute(chunk.chunkId ?? chunk.id ?? 'chunk');
-  const heading = xmlAttribute(formatHeadingPath(chunk.headingPath));
+  const chunkId = xmlAttribute(chunk.chunkId ?? chunk.id ?? 'chunk', secrets);
+  const heading = xmlAttribute(formatHeadingPath(chunk.headingPath), secrets);
   return `<untrusted_chunk chunk_id="${chunkId}" heading_path="${heading}">\n${safeEvidenceText(chunk.text ?? chunk.content ?? chunk.contentExcerpt ?? '', secrets)}\n</untrusted_chunk>`;
 }
 

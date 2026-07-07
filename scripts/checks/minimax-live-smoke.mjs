@@ -19,6 +19,14 @@ function requiredApiKey(env) {
   return apiKey.trim();
 }
 
+function requireHttpsBaseUrl(value) {
+  const baseUrl = String(value || MINIMAX_DEFAULTS.baseUrl).trim();
+  if (!/^https:\/\//i.test(baseUrl)) {
+    throw new Error('MINIMAX_BASE_URL must be an HTTPS URL for live MiniMax smoke');
+  }
+  return baseUrl;
+}
+
 function safeTokenUsage(tokenUsage) {
   return {
     input: tokenUsage?.input ?? null,
@@ -50,7 +58,7 @@ export async function runMiniMaxLiveSmoke({
 
   const provider = createMiniMaxProvider({
     apiKey,
-    baseUrl: env.MINIMAX_BASE_URL || MINIMAX_DEFAULTS.baseUrl,
+    baseUrl: requireHttpsBaseUrl(env.MINIMAX_BASE_URL),
     model: env.MINIMAX_MODEL || MINIMAX_DEFAULTS.model,
     transport,
     budget,

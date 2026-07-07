@@ -193,6 +193,48 @@ test('prompt builder wraps untrusted document and chunk text in delimiters, neut
   }
 });
 
+test('prompt builder redacts configured secrets from document and chunk attributes before provider transfer', async () => {
+  const { buildPromptMessages } = await importRequired(
+    'src/server/ai/prompts/builder.mjs',
+    ['buildPromptMessages'],
+    'AI prompt builder',
+  );
+
+  const documentIdCanary = 'tenant-secret-document-id-canary';
+  const documentTitleCanary = 'Confidential Acquisition Codename Canary';
+  const chunkIdCanary = 'chunk-secret-id-canary';
+  const headingCanary = 'Privileged Board Heading Canary';
+  const messages = buildPromptMessages({
+    promptId: chatPromptId,
+    promptVersion: '2026-07-07.1',
+    userQuestion: 'What is the obligation?',
+    document: {
+      id: documentIdCanary,
+      title: documentTitleCanary,
+      text: 'The supplier must maintain cyber insurance.',
+    },
+    chunks: [
+      {
+        chunkId: chunkIdCanary,
+        headingPath: ['Operations', headingCanary],
+        text: 'Cyber insurance must remain in force throughout the term.',
+      },
+    ],
+    secrets: { documentIdCanary, documentTitleCanary, chunkIdCanary, headingCanary },
+  });
+
+  const providerPrompt = JSON.stringify(messages);
+  for (const [label, canary] of [
+    ['document ID attribute', documentIdCanary],
+    ['document title attribute', documentTitleCanary],
+    ['chunk ID attribute', chunkIdCanary],
+    ['heading path attribute', headingCanary],
+  ]) {
+    assert.equal(providerPrompt.includes(canary), false, `${label} secret must be redacted before provider transfer`);
+  }
+  assert.match(providerPrompt, /cyber insurance/i, 'redaction must preserve non-secret evidence text for the provider');
+});
+
 test('prompt builder escapes untrusted delimiter text so evidence cannot close prompt wrappers', async () => {
   const { buildPromptMessages } = await importRequired(
     'src/server/ai/prompts/builder.mjs',
@@ -266,6 +308,46 @@ test('live-call budget gate rejects over-budget requests before MiniMax transpor
     'exhausted live-call budget must surface an explicit budget error',
   );
   assert.deepEqual(transportCalls, [], 'budget gate must run before the provider invokes network transport');
+});
+
+test('live-call budget consumes failed transport attempts before allowing another MiniMax request', async () => {
+  const { createMiniMaxProvider } = await importRequired(
+    'src/server/ai/minimax-provider.mjs',
+    ['createMiniMaxProvider'],
+    'MiniMax provider',
+  );
+
+  const transportCalls = [];
+  const provider = createMiniMaxProvider({
+    apiKey: 'sk-minimax_failed_budget_canary_1234567890',
+    baseUrl: 'https://api.minimax.io/v1',
+    model: 'MiniMax-M3',
+    budget: { maxLiveCalls: 1, usedLiveCalls: 0 },
+    transport: async (request) => {
+      transportCalls.push(request);
+      throw new Error('simulated MiniMax transport failure');
+    },
+  });
+
+  const request = {
+    documentId: 'doc-failed-budget',
+    userId: 'user-1',
+    question: 'Summarize the document.',
+    prompt: { id: fallbackPromptId, version: '2026-07-07.1' },
+    context: { strategy: 'fallback', retrievalBackend: 'lexical_fallback', chunks: [] },
+  };
+
+  await assert.rejects(
+    () => provider.answerQuestion(request),
+    /transport failure/i,
+    'the first in-budget attempt should surface the provider failure',
+  );
+  await assert.rejects(
+    () => provider.answerQuestion(request),
+    /budget|live call|over[- ]?budget/i,
+    'a failed live attempt must consume the only allowed live-call budget slot',
+  );
+  assert.equal(transportCalls.length, 1, 'second request must fail at the budget gate before transport');
 });
 
 test('central redaction removes MiniMax keys, JWT/database/auth secrets, raw document text, full prompts, provider responses, and stack traces', async () => {
@@ -390,6 +472,24 @@ test('MiniMax live smoke command requires opt-in and API key, validates response
     assert.deepEqual(transportCalls, [], 'live smoke must not touch transport without a MiniMax API key');
   });
 
+  await t.test('rejects non-HTTPS MINIMAX_BASE_URL before transport or key disclosure', async () => {
+    const apiKey = 'sk-minimax_live_http_canary_1234567890';
+    const transportCalls = [];
+    const logs = [];
+    await assert.rejects(
+      () => runMiniMaxLiveSmoke({
+        env: { DOCULENS_LIVE_MINIMAX: 'true', MINIMAX_API_KEY: apiKey, MINIMAX_BASE_URL: 'http://minimax.local/v1' },
+        transport: async (request) => {
+          transportCalls.push(request);
+          return { id: 'unexpected' };
+        },
+        log: (entry) => logs.push(String(entry)),
+      }),
+      /https|MINIMAX_BASE_URL|base url/i,
+    );
+    assert.deepEqual(transportCalls, [], 'non-HTTPS live smoke configuration must fail before transport invocation');
+    assert.equal(logs.join('\n').includes(apiKey), false, 'non-HTTPS rejection logs must not disclose API keys');
+  });
   await t.test('uses injectable transport for deterministic response-shape validation without logging secrets', async () => {
     const apiKey = 'sk-minimax_live_shape_canary_1234567890';
     const providerResponse = 'PROVIDER_RESPONSE_CANARY: deterministic live smoke response';
