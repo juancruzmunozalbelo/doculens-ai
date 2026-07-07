@@ -56,13 +56,13 @@
 
 ## 6. Frontend Experience
 
-- [ ] 6.1 Implement login route or view for seeded and registered users
-- [ ] 6.2 Implement document input route or view with authenticated submit flow and loading, error, and empty states
-- [ ] 6.3 Implement analysis/chat route or view for a selected document
-- [ ] 6.4 Display structured analysis fields including summary, entities, obligations, risks, and uncertainties
-- [ ] 6.5 Add chat input, answer rendering, citation display, unsupported-answer display, and fallback/uncertainty display
-- [ ] 6.6 Display retrieved chunks and AI transparency metadata including model, provider, context strategy, prompt version, thinking mode, retrieved chunk IDs, fallback reason, retrieval score summary, and token estimates
-- [ ] 6.7 Add canonical `data-testid` attributes: `auth.email-input`, `auth.password-input`, `auth.login-submit`, `document.title-input`, `document.content-input`, `document.submit`, `document.analyze`, `analysis.panel`, `analysis.summary`, `chat.input`, `chat.submit`, `chat.answer`, `chat.citations`, `chat.retrieved-chunks`, `ai.metadata`, `state.loading`, `state.error`, `state.empty`, and `answer.unsupported`
+- [x] 6.1 Implement login route or view for seeded and registered users
+- [x] 6.2 Implement document input route or view with authenticated submit flow and loading, error, and empty states
+- [x] 6.3 Implement analysis/chat route or view for a selected document
+- [x] 6.4 Display structured analysis fields including summary, entities, obligations, risks, and uncertainties
+- [x] 6.5 Add chat input, answer rendering, citation display, unsupported-answer display, and fallback/uncertainty display
+- [x] 6.6 Display retrieved chunks and AI transparency metadata including model, provider, context strategy, prompt version, thinking mode, retrieved chunk IDs, fallback reason, retrieval score summary, and token estimates
+- [x] 6.7 Add canonical `data-testid` attributes: `auth.email-input`, `auth.password-input`, `auth.login-submit`, `document.title-input`, `document.content-input`, `document.submit`, `document.analyze`, `analysis.panel`, `analysis.summary`, `chat.input`, `chat.submit`, `chat.answer`, `chat.citations`, `chat.retrieved-chunks`, `ai.metadata`, `state.loading`, `state.error`, `state.empty`, and `answer.unsupported`
 
 ## 7. Evaluation and Security Proof
 
@@ -130,7 +130,7 @@
 - [ ] 11.5 Deliver PR 4 on `feat/doculens-retrieval` for retrieval/fallback tasks 3.4-3.9 with pgvector/hybrid preferred, labeled `lexical_fallback` only if blocked, backend metadata, and fallback policy tests
 - [x] 11.6 Deliver PR 5 on `feat/doculens-minimax` for AI provider and prompt safety tasks 4.1-4.10 with MiniMax live-smoke shape validation, budget gates, prompt-injection guardrails, and redaction canaries
 - [x] 11.7 Deliver PR 6 on `feat/doculens-chat-api` for analysis/chat tasks 5.1-5.8 with structured analysis, RAG citations, unsupported-answer behavior, fallback metadata, and prompt-injection eval proof
-- [ ] 11.8 Deliver PR 7 on `feat/doculens-ui` for frontend tasks 6.1-6.7 with Playwright E2E using only canonical `data-testid` locators
+- [x] 11.8 Deliver PR 7 on `feat/doculens-ui` for frontend tasks 6.1-6.7 with Playwright E2E using only canonical `data-testid` locators
 - [ ] 11.9 Deliver PR 8 on `feat/doculens-eval` for eval/security proof tasks 7.1-7.16 gaps, including retrieval, fallback, citations, unsupported answers, prompt injection, authz, redaction, budget, and PostgreSQL integrity checks
 - [ ] 11.10 Deliver PR 9 on `feat/doculens-markitdown` for MarkItDown tasks 8.1-8.3 with sample PDF-to-Markdown smoke proof into the ingestion/chunking pipeline
 - [ ] 11.11 Deliver PR 10 on `feat/doculens-aws-demo` for AWS tasks 9.1-9.11 with Terraform validation, bounded cost defaults, secret-state safety, ALB health contract, and destroy guidance

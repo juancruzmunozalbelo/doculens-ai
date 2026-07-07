@@ -6,6 +6,8 @@ coverage/
 .next/
 .vite/
 .cache/
+test-results/
+playwright-report/
 
 # Environment and secrets
 .env
