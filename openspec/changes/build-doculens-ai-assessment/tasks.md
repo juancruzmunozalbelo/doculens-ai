@@ -1,13 +1,13 @@
 ## 1. Project Setup
 
-- [ ] 1.1 Scaffold React + Node.js app structure with shared configuration and documented local commands
-- [ ] 1.2 Add PostgreSQL local development configuration and shared `DATABASE_URL` contract for local, tests, and AWS
-- [ ] 1.3 Add environment configuration for MiniMax provider without committing secrets
-- [ ] 1.4 Define PostgreSQL schema for users, documents, chunks, analyses, messages, citations, prompt metadata, token estimates, fallback metadata, and ownership relationships
-- [ ] 1.5 Add migration, reset, and seed commands for the PostgreSQL demo workflow
-- [ ] 1.6 Add exact test scripts for unit, integration, Playwright E2E, MarkItDown smoke, eval, and combined verification commands
-- [ ] 1.7 Add placeholder-only `.env.example`, centralized secret redaction utility, and runtime rejection of weak/default `JWT_SECRET` outside explicit test mode
-- [ ] 1.8 Configure the implementation loop to follow TDD for every slice: write or update the failing unit/integration/eval/Playwright/smoke check first, observe red, implement, then refactor while keeping the check green
+- [x] 1.1 Scaffold React + Node.js app structure with shared configuration and documented local commands
+- [x] 1.2 Add PostgreSQL local development configuration and shared `DATABASE_URL` contract for local, tests, and AWS
+- [x] 1.3 Add environment configuration for MiniMax provider without committing secrets
+- [x] 1.4 Define PostgreSQL schema for users, documents, chunks, analyses, messages, citations, prompt metadata, token estimates, fallback metadata, and ownership relationships
+- [x] 1.5 Add migration, reset, and seed commands for the PostgreSQL demo workflow
+- [x] 1.6 Add exact test scripts for unit, integration, Playwright E2E, MarkItDown smoke, eval, and combined verification commands
+- [x] 1.7 Add placeholder-only `.env.example`, centralized secret redaction utility, and runtime rejection of weak/default `JWT_SECRET` outside explicit test mode
+- [x] 1.8 Configure the implementation loop to follow TDD for every slice: write or update the failing unit/integration/eval/Playwright/smoke check first, observe red, implement, then refactor while keeping the check green
 
 ## 2. Authentication and Ownership
 
