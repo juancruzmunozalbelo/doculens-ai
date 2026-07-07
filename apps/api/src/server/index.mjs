@@ -10,6 +10,15 @@ import {
   createInMemoryUserRepository,
   DocumentAccessError,
 } from './documents/service.mjs';
+import {
+  cleanupPdfUpload,
+  convertPdfUploadToText,
+  createMarkItDownPdfConverter,
+  isPdfUploadError,
+  normalizePdfUploadLimits,
+  parsePdfUploadMultipart,
+  pdfUploadErrorPayload,
+} from './documents/pdf-upload.mjs';
 import { createInMemoryChunkRepository } from './ingestion/chunk-repository.mjs';
 import { createMiniMaxProvider, MINIMAX_DEFAULTS } from './ai/minimax-provider.mjs';
 import { createDocumentAiService } from './chat/service.mjs';
@@ -365,6 +374,9 @@ export function createDocuLensServer(config, overrides = {}) {
     secrets: [config.databaseUrl, config.jwtSecret, config.minimax?.apiKey],
   }));
   const services = buildServices(config, overrides);
+  const pdfUploadLimits = normalizePdfUploadLimits(overrides.pdfUploadLimits ?? config.pdfUploadLimits);
+  const pdfConverter = overrides.pdfConverter ?? createMarkItDownPdfConverter(config.pdfConverter ?? {});
+  const pdfTempRoot = overrides.tempRoot ?? config.tempRoot;
 
   return createServer(async (request, response) => {
     const startedAt = performance.now();
@@ -394,6 +406,51 @@ export function createDocuLensServer(config, overrides = {}) {
         const body = await readJsonBody(request);
         const login = await services.auth.login(body);
         sendJson(response, 200, login);
+        return;
+      }
+
+      if (pathname === '/api/documents/uploads/pdf' && method === 'POST') {
+        await handleProtected(request, response, services, async (currentUser) => {
+          let upload;
+          try {
+            upload = await parsePdfUploadMultipart(request, {
+              limits: pdfUploadLimits,
+              tempRoot: pdfTempRoot,
+            });
+            const content = await convertPdfUploadToText({
+              upload,
+              converter: pdfConverter,
+              limits: pdfUploadLimits,
+            });
+            const document = await services.documents.createDocument({
+              currentUser,
+              title: upload.title,
+              content,
+              sourceType: 'pdf',
+              metadata: {
+                source: 'pdf_upload',
+                mimeType: upload.mimeType,
+                sizeBytes: upload.sizeBytes,
+                limits: {
+                  maxFileBytes: pdfUploadLimits.maxFileBytes,
+                  maxPages: pdfUploadLimits.maxPages,
+                  conversionTimeoutMs: pdfUploadLimits.conversionTimeoutMs,
+                  maxExtractedChars: pdfUploadLimits.maxExtractedChars,
+                },
+              },
+            });
+            await cleanupPdfUpload(upload);
+            upload = null;
+            sendJson(response, 201, { document });
+          } catch (error) {
+            await cleanupPdfUpload(upload);
+            if (isPdfUploadError(error)) {
+              sendJson(response, error.statusCode, pdfUploadErrorPayload(error));
+              return;
+            }
+            throw error;
+          }
+        });
         return;
       }
 

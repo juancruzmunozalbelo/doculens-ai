@@ -1,6 +1,6 @@
 # DocuLens AI
 
-DocuLens AI is a full-stack AI document assistant for the Full Stack AI Engineer assessment. It provides an authenticated document workspace where users submit Markdown/text documents, receive structured document analysis, and ask RAG-grounded questions with citations, retrieved chunk visibility, fallback metadata, and explicit unsupported-answer behavior.
+DocuLens AI is a full-stack AI document assistant for the Full Stack AI Engineer assessment. It provides an authenticated source-first review notebook where users choose one active source at a time, generate a concise review briefing, ask guided questions, inspect inline citations, and open technical AI details only when needed.
 
 This repository is public. Do not commit real secrets, `.env` files, Terraform state/plans, AWS credentials, MiniMax keys, JWT secrets, database passwords, raw sensitive document samples, or local harness folders.
 
@@ -20,10 +20,10 @@ Implemented and merged:
 - Citation validation: normal RAG answers cite only retrieved chunk IDs.
 - Unsupported-answer path for out-of-document questions.
 - Fallback path for low-coverage/global document synthesis with auditable fallback reason and uncertainty metadata.
-- React UI for login, document submit/list, analysis, chat, citations, retrieved chunks, loading/error/empty states, and AI metadata.
-- Canonical Playwright `data-testid` coverage.
-- Eval runner and regression tests for retrieval, fallback, citations, unsupported answers, authz, prompt injection, redaction, budget, and PostgreSQL integrity.
-- MarkItDown sample PDF conversion smoke path into the ingestion/chunking pipeline.
+- React source-first reviewer flow with authenticated Sources and Review Notebook views, source cards for the sample NDA, pasted text, and bounded PDF uploads, active-source scoping, starter questions before analysis, review briefing sections, answer cards with inline citations, persistent evidence panel, quiet recovery copy, print-safe review output, and technical-details disclosure.
+- Canonical Playwright `data-testid` coverage for the source-first notebook flow, quiet primary copy, PDF readiness/recovery, recent-source detail fetch, answer normalization, fallback/unsupported states, citation-linked evidence, print media behavior, and raw-internals absence.
+- Eval runner and regression tests for retrieval, fallback, citations, unsupported answers, authz, prompt injection, AI display sanitization, redaction, budget, PDF upload, and PostgreSQL integrity.
+- MarkItDown sample PDF conversion smoke path plus authenticated `/api/documents/uploads/pdf` ingestion for small text-based PDFs into the existing normalization/chunking pipeline.
 - Local Docker Compose path for frontend, backend, and PostgreSQL.
 - One-container AWS app image path plus Terraform demo stack for ECS Fargate, ALB, RDS PostgreSQL, Secrets Manager, CloudWatch, IAM, and security groups.
 
@@ -98,7 +98,7 @@ The PostgreSQL integrity contract covers foreign keys, duplicate stable chunk ID
 - `psql` client for database scripts and live PostgreSQL integrity checks
 - Optional: Docker / Docker Compose
 - Optional: Terraform 1.6+ for AWS validation/plan/apply
-- Optional: Microsoft MarkItDown CLI; the committed sample smoke uses a deterministic fallback for the tiny non-sensitive fixture when the local CLI is absent
+- Microsoft MarkItDown CLI (`markitdown`) for arbitrary reviewer PDF uploads. The committed sample smoke can use a deterministic fallback only for the tiny non-sensitive fixture when the local CLI is absent; product uploads do not use that fallback.
 - Optional: real MiniMax API key for live provider proof
 
 ### Install
@@ -174,11 +174,15 @@ npm run db:seed              # Seed demo data
 npm run demo:seed            # Alias for db:seed
 npm run test:unit            # Unit/contract coverage for AI, retrieval, chat, ingestion, config, redaction
 npm run test:integration     # HTTP/authz/integration contracts
-npm run test:e2e             # Playwright canonical UI flow
+npm run test:e2e             # Playwright canonical source-first reviewer flow
 npm run test:eval            # Eval regression test suite
 npm run test:docker          # Docker Compose contract
 npm run test:aws             # AWS/Terraform model contract
 npm run smoke:markitdown     # Sample PDF -> Markdown -> chunks smoke
+npx playwright test tests/e2e/doculens-ui.spec.mjs --reporter=list
+                                # Focused source-first notebook/PDF Playwright flow
+node --test tests/chat-api/chat-api-contract.test.mjs tests/ingestion/pdf-upload-contract.test.mjs
+                                # Focused answer-normalization + safe PDF error contracts
 npm run smoke:minimax        # Live MiniMax smoke, requires explicit opt-in and real key
 npm run eval                 # Reviewer-readable eval PASS/SKIP/FAIL output
 npm run verify               # Guardrail + foundation verification
@@ -225,19 +229,22 @@ Extended quality gates are intentionally separate from required CI:
 Every validation or release workflow that installs Node dependencies uses `npm ci`.
 
 
-## RAG, fallback, and unsupported behavior
+## Reviewer flow, fallback, and unsupported behavior
 
-Normal chat is RAG-first:
+The primary UI is source-first:
 
-1. The server retrieves top-k chunks scoped to the current user and document.
-2. The prompt builder wraps retrieved chunks as untrusted evidence.
-3. MiniMax-facing prompts receive redaction canaries and delimiter escaping.
-4. Normal answers must cite retrieved chunk IDs only.
-5. Response metadata exposes safe fields: provider/model, prompt version, retrieval backend, context strategy, retrieved chunk IDs, fallback reason, score summary, uncertainty, token estimates, and budget data.
+1. The reviewer creates or selects one active source: sample NDA, pasted text, or a text-based PDF.
+2. The notebook keeps the active source visible beside briefing, guided questions, answers, citations, and evidence.
+3. Starter questions are available immediately after the source is ready; structured analysis is presented as a review briefing.
+4. Grounded answers show concise prose with inline citation affordances and a persistent evidence panel.
+5. The visible trust summary stays human-level: `Based on this document`, citation count, `Not enough evidence`, or `Outside this document`.
+6. Provider/model, prompt version, retrieval mode, fallback reason, token usage, and diagnostics remain in the explicit technical-details disclosure.
 
-Fallback is explicit. Low-coverage or whole-document synthesis questions can use a controlled fallback strategy, but metadata records the fallback reason and uncertainty.
+Normal chat remains RAG-first behind the UI boundary. Normal answers must cite retrieved chunk IDs in API data, but raw IDs, scores, provider payloads, raw metadata, prompt internals, and JSON-shaped provider text are normalized or hidden before rendering.
 
-Unsupported answers are explicit. Out-of-document/current-facts questions refuse instead of silently fabricating citations or using unsupported model knowledge.
+Fallback is explicit in metadata. Low-coverage or whole-document fallback without valid citations is shown to the reviewer as `Not enough evidence` guidance rather than a substantive grounded final answer.
+
+Unsupported answers are explicit. Out-of-document/current-facts questions render an `Outside this document` state with suggested in-source questions instead of fabricated citations.
 
 ## Retrieval backend and fallback policy
 
@@ -276,7 +283,19 @@ Implemented request/context limits:
 - Default MiniMax server budget allows up to 32 live calls, 8,000 estimated input tokens, 800 output tokens, 8,000 context tokens, one retry, concurrency 2, and estimated cost cap 1 USD.
 - Raw MiniMax provider defaults cap configured input/context estimates at 16,000 tokens when not overridden.
 
-## MarkItDown sample PDF flow
+## PDF source readiness and MarkItDown
+
+Reviewer PDF intake is authenticated at `POST /api/documents/uploads/pdf` with `multipart/form-data`. The UI presents it as source readiness: selected PDF, reading, ready source, or failed with recovery.
+
+- required `file`: exactly one text-based PDF;
+- optional `title`: reviewer-facing source title;
+- default limits: max 5 MiB upload, max 20 detectable pages, max 15 second processing window, max 120,000 extracted characters;
+- no OCR: scanned/image-only PDFs fail safely with `Choose another PDF` and `Paste text instead`;
+- failures use safe 400/401/413/415/422/503-style responses with categories and do not create ready documents, chunks, analysis, chat messages, or citations.
+
+The backend invokes a real MarkItDown-compatible CLI for arbitrary user uploads. Docker runtime images install MarkItDown in a Python venv and expose `markitdown` on `PATH`. Converter stdout/stderr, local paths, stack traces, raw excerpts, command output, and dependency internals are redacted from responses/logs and are not shown in the primary reviewer path.
+
+The sample smoke remains fixture-only:
 
 Files:
 
@@ -299,7 +318,7 @@ Observed output:
 MarkItDown smoke converted the sample PDF into ingestion-ready Markdown chunks.
 ```
 
-The committed PDF is tiny and synthetic. It contains no sensitive document content. The smoke verifies the converted Markdown preserves sample text, normalizes through the existing ingestion path, and produces stable chunks with heading metadata and positive token estimates.
+The committed PDF is tiny and synthetic. It contains no sensitive document content. The smoke verifies the converted Markdown preserves sample text, normalizes through the existing ingestion path, and produces stable chunks with heading metadata and positive token estimates. The deterministic fallback in `scripts/markitdown/convert-sample.mjs` is smoke-only and is never used for arbitrary reviewer uploads.
 
 ## UI and canonical Playwright selectors
 
@@ -308,24 +327,24 @@ Canonical `data-testid` values:
 | Area | Test IDs |
 | --- | --- |
 | Auth | `auth.email-input`, `auth.password-input`, `auth.login-submit` |
-| Document input | `document.title-input`, `document.content-input`, `document.submit`, `document.analyze` |
-| Analysis | `analysis.panel`, `analysis.summary` |
-| Chat | `chat.input`, `chat.submit`, `chat.answer`, `chat.citations`, `chat.retrieved-chunks` |
-| AI transparency | `ai.metadata` |
+| Source creation | `source.create`, `intake.sample-cta`, `intake.paste-panel`, `intake.pdf-panel`, `intake.pdf-input`, `intake.pdf-submit`, `pdf.selected-source`, `pdf.status`, `pdf.recovery`, `pdf.paste-text-fallback` |
+| Source notebook | `nav.intake`, `nav.workspace`, `source.rail`, `source.card`, `source.status`, `source.active`, `source.management`, `workspace.root` |
+| Review briefing | `document.analyze`, `analysis.panel`, `analysis.summary`, `review.briefing`, `review.starter-questions`, `review.starter-question` |
+| Chat/evidence | `chat.input`, `chat.submit`, `chat.answer`, `chat.citations`, `chat.retrieved-chunks`, `answer.card`, `answer.evidence-chip`, `answer.inline-citation`, `answer.unsupported`, `evidence.panel`, `evidence.source`, `evidence.section`, `evidence.excerpt` |
+| Trust/print | `ai.metadata`, `ai.trust-bar`, `ai.details`, `trust.summary`, `trust.technical-details`, `print.review-output` |
 | State | `state.loading`, `state.error`, `state.empty` |
-| Unsupported answer | `answer.unsupported` |
 
 Playwright coverage:
 
 ```bash
-npm run test:e2e
+npx playwright test tests/e2e/doculens-ui.spec.mjs --reporter=list
 ```
 
-Observed final verification:
+Observed focused verification:
 
 ```txt
-Running 2 tests using 1 worker
-2 passed
+Running 8 tests using 1 worker
+8 passed
 ```
 
 ## Docker

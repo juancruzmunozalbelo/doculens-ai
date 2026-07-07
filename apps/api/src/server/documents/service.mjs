@@ -101,18 +101,18 @@ export function createInMemoryDocumentRepository(initialDocuments = []) {
   }
 
   return {
-    async createForUser({ userId, title, content, status = 'ready' }) {
+    async createForUser({ userId, title, content, status = 'ready', sourceType = 'markdown', metadata = {} }) {
       const now = new Date().toISOString();
       const row = {
         id: randomUUID(),
         userId,
         title,
         content,
-        sourceType: 'markdown',
+        sourceType,
         status,
         contentSha256: contentSha256(content),
         tokenEstimate: content.split(/\s+/).filter(Boolean).length,
-        metadata: {},
+        metadata,
         createdAt: now,
         updatedAt: now,
       };
@@ -170,7 +170,7 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
     };
   }
 
-  async function createDocument({ currentUser, title, content }) {
+  async function createDocument({ currentUser, title, content, sourceType = 'markdown', metadata = {} }) {
     const user = requireCurrentUser(currentUser);
     const normalizedContent = normalize(requireText(content, 'content'));
     if (normalizedContent === '') {
@@ -183,6 +183,8 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
       userId: user.id,
       title: requireText(title, 'title'),
       content: normalizedContent,
+      sourceType,
+      metadata,
     });
 
     if (!chunks) {
