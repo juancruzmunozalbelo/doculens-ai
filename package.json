@@ -14,6 +14,7 @@
     "test:e2e": "node scripts/checks/e2e-contract.mjs",
     "smoke:markitdown": "node scripts/checks/markitdown-contract.mjs",
     "eval": "node scripts/checks/eval-contract.mjs",
+    "smoke:minimax": "node scripts/checks/minimax-live-smoke.mjs",
     "verify": "node --test scripts/guardrails/check-tdd.test.mjs && node --test tests/foundation/foundation-contract.test.mjs",
     "guard:tdd": "node scripts/guardrails/check-tdd.mjs --staged"
   },
