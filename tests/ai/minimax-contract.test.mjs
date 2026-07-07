@@ -405,8 +405,8 @@ test('live-call budget consumes failed transport attempts before allowing anothe
 
   await assert.rejects(
     () => provider.answerQuestion(request),
-    /transport failure/i,
-    'the first in-budget attempt should surface the provider failure',
+    /simulated MiniMax transport failure/i,
+    'the first in-budget attempt should surface the safe provider failure message',
   );
   await assert.rejects(
     () => provider.answerQuestion(request),
