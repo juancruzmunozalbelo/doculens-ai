@@ -1,6 +1,6 @@
 insert into users (id, email, password_hash, display_name)
 values
-  ('00000000-0000-4000-8000-000000000001', 'demo@doculens.local', 'scrypt$16384$8$1$doculens-demo-seed-v1$bJSlYm4y48cxSO_QaUA5UgcAJbKnWjf2GfOHIyCMwhULN4srwI_WloqucpZ_yo7VT45CiMrEvATb-PDzv5w_WA', 'DocuLens Demo User'),
+  ('00000000-0000-4000-8000-000000000001', 'demo@doculens.local', 'scrypt$16384$8$1$doculens-demo-seed-v2$Kk2WJhi80ffr7EOkCZsUZRiSZ9kk6esGakDLhx3yyitemYuTulVPdv9yPp_9a6fbYoXMBMFICS54z7BVoiUk5A', 'DocuLens Demo User'),
   ('00000000-0000-4000-8000-000000000002', 'authz-test@doculens.local', 'scrypt$16384$8$1$doculens-authz-seed-v1$DAh1fJVNMF2RiHVO5KbeJxgQr6M5ZJR06B2aN-U7evFgknCw-QWQY90kSEMx8P3WI-_4GhWoYdU0fitZ4zMWNA', 'DocuLens Authz Test User')
 on conflict (email) do update set display_name = excluded.display_name, password_hash = excluded.password_hash;
 
