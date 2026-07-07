@@ -2,7 +2,7 @@
 
 DocuLens AI is a planned full-stack AI document assistant for a Full Stack AI Engineer assessment. The target product is an authenticated document workspace where users submit Markdown/text documents, receive structured analysis from MiniMax M3, and ask RAG-grounded questions with citations, retrieved chunk visibility, fallback metadata, and explicit uncertainty.
 
-> Current status: this repository contains the OpenSpec change artifacts, TDD guardrails, PR delivery plan, and repository protection setup. The runnable application is intentionally not claimed as implemented yet; implementation starts with `feat/doculens-foundation`.
+> Current status: PR 1 foundation is implemented on `feat/doculens-foundation`: package scripts, a minimal React/Node scaffold, PostgreSQL migration/reset/seed commands, placeholder-only environment documentation, runtime config validation, centralized redaction, and foundation contract tests. Auth, RAG, MiniMax live calls, product UI workflow, MarkItDown conversion, and AWS/Terraform remain later PR scopes.
 
 ## Assessment strategy
 
@@ -88,15 +88,31 @@ Implemented in this repository today:
   ```
 
 - Protected `main` requiring the `guardrails` status check, including for admins.
+- PR 1 foundation scaffold:
+
+  ```txt
+  package.json
+  index.html
+  vite.config.mjs
+  src/client/
+  src/server/
+  db/migrations/
+  db/seeds/
+  scripts/db/
+  scripts/checks/
+  tests/foundation/
+  ```
+
+- Placeholder-only `.env.example` for PostgreSQL, MiniMax, and JWT configuration.
+- Centralized runtime redaction in `src/server/security/redact.mjs`.
+- Runtime configuration loading in `src/server/config/env.mjs`, including weak/default `JWT_SECRET` rejection outside explicit test mode.
+
 
 Not implemented yet:
 
-- Runtime React app.
-- Runtime Node API.
-- Database migrations.
-- MiniMax live provider code.
-- RAG/chat endpoints.
-- Playwright E2E flow.
+- Auth routes, password hashing, JWT issuance, and owner-scoped API behavior.
+- Runtime RAG/retrieval, MiniMax provider calls, analysis/chat endpoints, and prompt/citation enforcement.
+- Product UI workflow beyond the minimal React scaffold.
 - MarkItDown conversion script.
 - Terraform AWS demo stack.
 
@@ -217,34 +233,36 @@ prompts/omp-doculens-loop.md
 
 It tells OMP to start with PR 1, use Tester subagents first, have writing subagents create their own git worktrees for parallel work, keep each PR scoped to one vertical capability, enforce red/green TDD evidence, record progress/blockers in a local ignored `.doculens-loop/` ledger, coordinate shared-file edits through subagents, and preserve the public-repo no-secrets contract.
 
-## Planned local commands
+## Local foundation commands
 
-These commands are planned implementation deliverables. They are not claimed to work until the relevant PRs land.
+PR 1 wires the foundation commands below. Database commands require `DATABASE_URL` pointing at PostgreSQL and use `psql`; later PRs replace the foundation check commands with the relevant unit, integration, E2E, MarkItDown, and live-eval behavior.
 
 ```bash
-npm run db:reset
-npm run demo:seed
 npm run dev
+npm run db:migrate
+npm run db:reset
+npm run db:seed
 npm run test:unit
 npm run test:integration
 npm run test:e2e
-npm run test:markitdown
-AI_PROVIDER=minimax npm run eval
+npm run smoke:markitdown
+npm run eval
 npm run verify
+npm run guard:tdd
 ```
 
-## Planned MiniMax configuration
+## MiniMax and database configuration
 
-Runtime implementation will use placeholders only in committed files.
+Committed files use placeholders only; copy `.env.example` to a private `.env` file if you need local shell exports.
 
-Expected environment variables:
+Required environment variables:
 
 ```bash
 AI_PROVIDER=minimax
 MINIMAX_API_KEY=<provided-out-of-band>
-MINIMAX_BASE_URL=<provider-base-url>
+MINIMAX_BASE_URL=https://api.minimax.chat/v1
 MINIMAX_MODEL=MiniMax-M3
-JWT_SECRET=<strong-local-secret>
+JWT_SECRET=<strong-local-secret-at-least-32-chars>
 DATABASE_URL=postgresql://...
 ```
 

@@ -1,0 +1,30 @@
+{
+  "name": "doculens-ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DocuLens AI foundation scaffold for the assessment implementation.",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "db:migrate": "node scripts/db/migrate.mjs",
+    "db:reset": "node scripts/db/reset.mjs",
+    "db:seed": "node scripts/db/seed.mjs",
+    "test:unit": "node --test tests/foundation/foundation-contract.test.mjs",
+    "test:integration": "node scripts/checks/integration-contract.mjs",
+    "test:e2e": "node scripts/checks/e2e-contract.mjs",
+    "smoke:markitdown": "node scripts/checks/markitdown-contract.mjs",
+    "eval": "node scripts/checks/eval-contract.mjs",
+    "verify": "node --test scripts/guardrails/check-tdd.test.mjs && node --test tests/foundation/foundation-contract.test.mjs",
+    "guard:tdd": "node scripts/guardrails/check-tdd.mjs --staged"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {}
+}
