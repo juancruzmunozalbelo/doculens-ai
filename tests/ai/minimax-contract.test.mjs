@@ -52,7 +52,7 @@ test('MiniMaxProvider satisfies the AIProvider contract and returns auditable pr
   const transportCalls = [];
   const provider = createMiniMaxProvider({
     apiKey: 'sk-minimax_contract_metadata_canary_1234567890',
-    baseUrl: 'https://api.minimax.chat/v1',
+    baseUrl: 'https://api.minimax.io/v1',
     model: 'MiniMax-M3',
     transport: async (request) => {
       transportCalls.push(request);
@@ -199,7 +199,7 @@ test('live-call budget gate rejects over-budget requests before MiniMax transpor
   const transportCalls = [];
   const provider = createMiniMaxProvider({
     apiKey: 'sk-minimax_budget_canary_1234567890',
-    baseUrl: 'https://api.minimax.chat/v1',
+    baseUrl: 'https://api.minimax.io/v1',
     model: 'MiniMax-M3',
     budget: { maxLiveCalls: 0, usedLiveCalls: 0 },
     transport: async (request) => {

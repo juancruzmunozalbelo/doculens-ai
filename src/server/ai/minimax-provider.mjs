@@ -3,7 +3,7 @@ import { assertAIProvider } from './provider.mjs';
 import { buildPromptMessages } from './prompts/builder.mjs';
 import { getPromptDefinition, PROMPT_VERSION } from './prompts/registry.mjs';
 
-const DEFAULT_BASE_URL = 'https://api.minimax.chat/v1';
+const DEFAULT_BASE_URL = 'https://api.minimax.io/v1';
 const DEFAULT_MODEL = 'MiniMax-M3';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_OUTPUT_TOKENS = 800;
