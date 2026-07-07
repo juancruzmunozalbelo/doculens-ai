@@ -67,21 +67,21 @@
 ## 7. Evaluation and Security Proof
 
 - [ ] 7.1 Implement `npm run eval` runner using PostgreSQL and MiniMax provider mode with configured `MINIMAX_API_KEY`
-- [ ] 7.2 Eval seeded user, second user, seeded document, adversarial section, and chunk creation
-- [ ] 7.3 Eval retrieval returns top-k chunks for a supported seeded question and records context strategy `rag`
-- [ ] 7.4 Eval fallback question records context strategy `fallback`, fallback reason, retrieval score summary, uncertainty, and citation policy
-- [ ] 7.5 Eval structured analysis schema validity and MiniMax provider/model metadata
-- [ ] 7.6 Eval chat citations map only to retrieved chunk IDs
-- [ ] 7.7 Eval unsupported seeded question returns refusal or unsupported response without fabricated citations
-- [ ] 7.8 Eval prompt-injection attempt is ignored, citations remain valid, and no hidden prompt, API key, JWT, or secret is exposed
-- [ ] 7.9 Eval second user cannot access seeded user's document, analysis, messages, chunks, citations, chat endpoint, or delete path
-- [ ] 7.10 Ensure eval output prints concise pass/fail lines and exits non-zero on failure
-- [ ] 7.11 Add focused unit tests for chunking, retrieval scoring, fallback decision logic, citation validation, prompt metadata, prompt construction guardrails, schema parsing, and unsupported-answer decisions
-- [ ] 7.12 Add integration tests for auth, owner-scoped documents, child-resource denial, ingestion, analysis, chat, fallback/refusal routing, prompt-injection guardrail behavior, and cross-user denial using PostgreSQL
-- [ ] 7.13 Add Playwright E2E test for login/document input/analysis/chat/citations/retrieved chunks/unsupported-answer/AI metadata using only canonical `data-testid` locators
-- [ ] 7.14 Add MiniMax budget/rate-limit tests proving over-budget requests skip provider invocation and eval prints call/token totals
-- [ ] 7.15 Add secret/document redaction canary tests covering stdout, stderr, app logs, eval output, error responses, and provider error logs
-- [ ] 7.16 Add PostgreSQL integrity tests for foreign keys, unique chunk IDs per document, same-document citation/message/chunk relationships, orphan rejection, delete/soft-delete visibility, transaction rollback, and migration/reset idempotency
+- [x] 7.2 Eval seeded user, second user, seeded document, adversarial section, and chunk creation
+- [x] 7.3 Eval retrieval returns top-k chunks for a supported seeded question and records context strategy `rag`
+- [x] 7.4 Eval fallback question records context strategy `fallback`, fallback reason, retrieval score summary, uncertainty, and citation policy
+- [x] 7.5 Eval structured analysis schema validity and MiniMax provider/model metadata
+- [x] 7.6 Eval chat citations map only to retrieved chunk IDs
+- [x] 7.7 Eval unsupported seeded question returns refusal or unsupported response without fabricated citations
+- [x] 7.8 Eval prompt-injection attempt is ignored, citations remain valid, and no hidden prompt, API key, JWT, or secret is exposed
+- [x] 7.9 Eval second user cannot access seeded user's document, analysis, messages, chunks, citations, chat endpoint, or delete path
+- [x] 7.10 Ensure eval output prints concise pass/fail lines and exits non-zero on failure
+- [x] 7.11 Add focused unit tests for chunking, retrieval scoring, fallback decision logic, citation validation, prompt metadata, prompt construction guardrails, schema parsing, and unsupported-answer decisions
+- [x] 7.12 Add integration tests for auth, owner-scoped documents, child-resource denial, ingestion, analysis, chat, fallback/refusal routing, prompt-injection guardrail behavior, and cross-user denial using PostgreSQL
+- [x] 7.13 Add Playwright E2E test for login/document input/analysis/chat/citations/retrieved chunks/unsupported-answer/AI metadata using only canonical `data-testid` locators
+- [x] 7.14 Add MiniMax budget/rate-limit tests proving over-budget requests skip provider invocation and eval prints call/token totals
+- [x] 7.15 Add secret/document redaction canary tests covering stdout, stderr, app logs, eval output, error responses, and provider error logs
+- [x] 7.16 Add PostgreSQL integrity tests for foreign keys, unique chunk IDs per document, same-document citation/message/chunk relationships, orphan rejection, delete/soft-delete visibility, transaction rollback, and migration/reset idempotency
 
 ## 8. MarkItDown and Documentation
 
