@@ -41,6 +41,50 @@ function assertDoesNotContain(workflow, pattern, message) {
   assert.doesNotMatch(workflow.text, pattern, `${workflow.relativePath}: ${message}`);
 }
 
+function runCommandLines(workflow) {
+  const lines = workflow.text.split(/\r?\n/);
+  const commands = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = /^(\s*)run:\s*(.*)$/.exec(line);
+    if (!match) continue;
+
+    const runIndent = match[1].length;
+    const value = match[2].trim();
+    if (value && !/^[|>]/.test(value)) {
+      commands.push({ lineNumber: index + 1, text: value });
+      continue;
+    }
+
+    for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
+      const bodyLine = lines[bodyIndex];
+      if (bodyLine.trim() === '') continue;
+
+      const bodyIndent = /^\s*/.exec(bodyLine)[0].length;
+      if (bodyIndent <= runIndent) break;
+      commands.push({ lineNumber: bodyIndex + 1, text: bodyLine.trim() });
+    }
+  }
+
+  return commands;
+}
+
+function assertNoWorkflowInputsInRunCommands(workflow) {
+  const offenders = runCommandLines(workflow).filter(({ text }) => /\$\{\{\s*inputs\.[^}]+\}\}/i.test(text));
+  assert.equal(
+    offenders.length,
+    0,
+    `${workflow.relativePath}: run commands must consume workflow_dispatch inputs through environment variables before shell expansion; direct \${{ inputs.* }} interpolation found on ${offenders.map(({ lineNumber }) => `line ${lineNumber}`).join(', ')}`,
+  );
+}
+
+function firstRunCommandLineMatching(workflow, pattern, label) {
+  const match = runCommandLines(workflow).find(({ text }) => pattern.test(text));
+  assert.ok(match, `${workflow.relativePath}: run commands must include ${label}`);
+  return match.lineNumber;
+}
+
 function assertLeastPrivilegeCommon(workflow) {
   assertContains(workflow, /permissions:\s*(?:\r?\n\s+[a-z-]+:\s+\w+)+/i, 'must declare explicit top-level permissions');
   assertContains(workflow, /contents:\s*read\b/i, 'permissions must keep repository contents read-only by default');
@@ -88,6 +132,10 @@ test('AWS deploy workflow is manual, environment-gated, OIDC-based, and budget-s
   assertContains(deploy, /aws-actions\/configure-aws-credentials/i, 'AWS deploy must configure AWS credentials through the official OIDC action');
   assertContains(deploy, /role-to-assume:\s*\$\{\{\s*(?:secrets|vars)\.[A-Z0-9_]+\s*\}\}/i, 'AWS deploy must assume an environment-protected AWS role');
   assertDoesNotContain(deploy, /aws-access-key-id:|aws-secret-access-key:/i, 'AWS deploy must not use long-lived AWS access keys');
+  assertNoWorkflowInputsInRunCommands(deploy);
+  const terraformInitLine = firstRunCommandLineMatching(deploy, /\bterraform\s+-chdir=infra\/aws\s+init\b/i, 'Terraform init');
+  const terraformPlanLine = firstRunCommandLineMatching(deploy, /\bterraform\s+-chdir=infra\/aws\s+plan\b/i, 'Terraform plan');
+  assert.ok(terraformInitLine < terraformPlanLine, `${deploy.relativePath}: Terraform init must run before Terraform plan`);
   assertContains(deploy, /terraform\s+-chdir=infra\/aws\s+plan/i, 'AWS deploy must produce a Terraform plan before apply');
   assertContains(deploy, /terraform\s+-chdir=infra\/aws\s+apply/i, 'AWS deploy must apply the reviewed Terraform plan explicitly');
   assertContains(deploy, /timeout-minutes:\s*(?:[1-9]|[1-2][0-9]|30)\b/i, 'AWS deploy jobs must have a small timeout to bound demo spend');
@@ -104,6 +152,7 @@ test('AWS rollback workflow is manual, environment-gated, and cannot deploy arbi
   assertContains(rollback, /environment:\s*(?:\r?\n\s+name:\s*)?(?:aws-demo|demo|production)/i, 'AWS rollback must require the same GitHub environment gate as deploy');
   assertContains(rollback, /workflow_dispatch:[\s\S]*inputs:[\s\S]*(?:image_uri|task_definition|revision|rollback_target|deployment_id)/i, 'AWS rollback must require an explicit reviewed rollback target input');
   assertContains(rollback, /aws\s+ecs\s+(?:update-service|describe-services)|terraform\s+-chdir=infra\/aws\s+apply/i, 'AWS rollback must execute an ECS or Terraform rollback operation');
+  assertNoWorkflowInputsInRunCommands(rollback);
   assertContains(rollback, /timeout-minutes:\s*(?:[1-9]|[1-2][0-9]|30)\b/i, 'AWS rollback jobs must have a small timeout to bound spend');
 });
 

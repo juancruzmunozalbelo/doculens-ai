@@ -34,6 +34,12 @@ jobs:
     environment:
       name: aws-demo
     timeout-minutes: 20
+    env:
+      AWS_REGION_VALUE: ${{ vars.AWS_REGION || 'us-east-1' }}
+      EXPECTED_ACCOUNT: ${{ inputs.expected_account }}
+      ROLLBACK_CLUSTER: ${{ inputs.cluster }}
+      ROLLBACK_SERVICE: ${{ inputs.service }}
+      ROLLBACK_TARGET: ${{ inputs.rollback_target }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,14 +53,14 @@ jobs:
           aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
           aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
           aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
-          aws configure set region "${{ vars.AWS_REGION || 'us-east-1' }}" --profile doculens-demo
+          aws configure set region "$AWS_REGION_VALUE" --profile doculens-demo
       - name: Install Node for context guard
         uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Guard AWS context
-        run: node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "${{ vars.AWS_REGION || 'us-east-1' }}" --expected-account "${{ inputs.expected_account }}"
+        run: node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
       - name: Roll back ECS service to reviewed target
-        run: aws ecs update-service --cluster "${{ inputs.cluster }}" --service "${{ inputs.service }}" --task-definition "${{ inputs.rollback_target }}" --region "${{ vars.AWS_REGION || 'us-east-1' }}"
+        run: aws ecs update-service --cluster "$ROLLBACK_CLUSTER" --service "$ROLLBACK_SERVICE" --task-definition "$ROLLBACK_TARGET" --region "$AWS_REGION_VALUE"
       - name: Verify ECS service after rollback
-        run: aws ecs describe-services --cluster "${{ inputs.cluster }}" --services "${{ inputs.service }}" --region "${{ vars.AWS_REGION || 'us-east-1' }}"
+        run: aws ecs describe-services --cluster "$ROLLBACK_CLUSTER" --services "$ROLLBACK_SERVICE" --region "$AWS_REGION_VALUE"

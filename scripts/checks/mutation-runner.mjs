@@ -5,10 +5,13 @@ function parseArgs(argv) {
   const options = { mode: 'smoke', scope: 'apps/api/src/server/security', command: 'npm run test:unit' };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === '--mode') options.mode = argv[++index];
-    else if (arg === '--scope' || arg === '--mutate') options.scope = argv[++index];
-    else if (arg === '--command') options.command = argv[++index];
+    const [flag, inlineValue] = arg.includes('=') ? arg.split(/=(.*)/s, 2) : [arg, undefined];
+    const value = inlineValue === undefined ? argv[index + 1] : inlineValue;
+    if (flag === '--mode') options.mode = value;
+    else if (flag === '--scope' || flag === '--mutate') options.scope = value;
+    else if (flag === '--command') options.command = value;
     else throw new Error(`Unknown argument: ${arg}`);
+    if (inlineValue === undefined) index += 1;
   }
   return options;
 }

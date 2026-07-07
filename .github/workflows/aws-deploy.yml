@@ -26,6 +26,13 @@ jobs:
     environment:
       name: aws-demo
     timeout-minutes: 30
+    env:
+      AWS_REGION_VALUE: ${{ vars.AWS_REGION || 'us-east-1' }}
+      EXPECTED_ACCOUNT: ${{ inputs.expected_account }}
+      IMAGE_URI: ${{ inputs.image_uri }}
+      DESIRED_COUNT: ${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}
+      DB_INSTANCE_CLASS: ${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}
+      DB_ALLOCATED_STORAGE: ${{ vars.AWS_DEMO_DB_ALLOCATED_STORAGE || '20' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -39,7 +46,7 @@ jobs:
           aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
           aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
           aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
-          aws configure set region "${{ vars.AWS_REGION || 'us-east-1' }}" --profile doculens-demo
+          aws configure set region "$AWS_REGION_VALUE" --profile doculens-demo
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
       - name: Install Node for context guard
@@ -48,11 +55,13 @@ jobs:
           node-version: '22'
       - name: Guard AWS context and free demo budget
         run: |
-          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "${{ vars.AWS_REGION || 'us-east-1' }}" --expected-account "${{ inputs.expected_account }}"
-          test "${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}" = "1"
-          test "${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}" = "db.t4g.micro"
+          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
+          test "$DESIRED_COUNT" = "1"
+          test "$DB_INSTANCE_CLASS" = "db.t4g.micro"
+      - name: Terraform init
+        run: terraform -chdir=infra/aws init
       - name: Terraform plan tiny demo capacity
-        run: terraform -chdir=infra/aws plan -out=doculens-demo.tfplan -var "image_uri=${{ inputs.image_uri }}" -var "desired_count=${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}" -var "db_instance_class=${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}" -var "db_allocated_storage=${{ vars.AWS_DEMO_DB_ALLOCATED_STORAGE || '20' }}"
+        run: terraform -chdir=infra/aws plan -out=doculens-demo.tfplan -var "image_uri=$IMAGE_URI" -var "desired_count=$DESIRED_COUNT" -var "db_instance_class=$DB_INSTANCE_CLASS" -var "db_allocated_storage=$DB_ALLOCATED_STORAGE"
       - name: Terraform apply reviewed plan
         run: terraform -chdir=infra/aws apply -auto-approve doculens-demo.tfplan
       - name: Smoke ALB health
