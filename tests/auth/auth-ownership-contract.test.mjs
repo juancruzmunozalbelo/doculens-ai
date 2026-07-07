@@ -9,7 +9,7 @@ import test from 'node:test';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const fixedNow = new Date('2026-07-07T12:00:00.000Z');
-const jwtSecret = 'ContractTestJwtSecretWithEnoughEntropy123';
+const jwtSecret = 'test-only-jwt-secret-fixture';
 
 async function importRequired(relativePath, exportNames, purpose) {
   const modulePath = path.join(repoRoot, relativePath);

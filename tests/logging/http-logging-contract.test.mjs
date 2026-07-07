@@ -30,7 +30,7 @@ function testConfig() {
     jwtSecret,
     aiProvider: 'minimax',
     minimax: Object.freeze({
-      apiKey: 'sk-minimax_logging_contract_canary_1234567890',
+      apiKey: 'minimax-test-key-logging-contract-canary',
       baseUrl: 'https://api.minimax.io/v1',
       model: 'MiniMax-M3',
     }),
@@ -131,7 +131,7 @@ test('HTTP error logs are structured and redact raw body, password, document, pr
     prompt: 'PROMPT_LOG_CANARY_ignore_previous_instructions',
     secret: 'SECRET_LOG_CANARY_must_not_print',
     databasePassword: 'logging_db_password_canary',
-    minimaxKey: 'sk-minimax_logging_contract_canary_1234567890',
+    minimaxKey: 'minimax-test-key-logging-contract-canary',
   };
   const { baseUrl, server, logs } = await createServerHarness({
     auth: {

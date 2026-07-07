@@ -41,7 +41,7 @@ function testConfig() {
   return Object.freeze({
     nodeEnv: 'test',
     aiProvider: 'minimax',
-    jwtSecret: 'ContractTestJwtSecretWithEnoughEntropy123',
+    jwtSecret: 'test-only-jwt-secret-fixture',
     databaseUrl: 'postgresql://doculens_contract:DATABASE_URL_PASSWORD_SHOULD_NOT_LEAK@localhost:5432/doculens_contract',
     minimaxApiKey,
     minimax: Object.freeze({ apiKey: minimaxApiKey }),

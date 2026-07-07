@@ -55,7 +55,7 @@ test('MiniMaxProvider satisfies the AIProvider contract and returns auditable pr
 
   const transportCalls = [];
   const provider = createMiniMaxProvider({
-    apiKey: 'sk-minimax_contract_metadata_canary_1234567890',
+    apiKey: 'minimax-test-key-contract-metadata-canary',
     baseUrl: 'https://api.minimax.io/v1',
     model: 'MiniMax-M3',
     transport: async (request) => {
@@ -131,7 +131,7 @@ test('MiniMaxProvider normalizes prose analysis responses into service-acceptabl
   const proseSummary = 'The agreement requires Acme to protect Beta financial information for three years and flags unresolved audit-scope uncertainty.';
   const transportCalls = [];
   const provider = createMiniMaxProvider({
-    apiKey: 'sk-minimax_analysis_prose_canary_1234567890',
+    apiKey: 'minimax-test-key-analysis-prose-canary',
     baseUrl: 'https://api.minimax.io/v1',
     model: 'MiniMax-M3',
     transport: async (request) => {
@@ -216,7 +216,7 @@ test('prompt builder wraps untrusted document and chunk text in delimiters, neut
     'AI prompt builder',
   );
 
-  const minimaxApiKey = 'sk-minimax_prompt_builder_secret_1234567890';
+  const minimaxApiKey = 'minimax-test-key-prompt-builder-canary';
   const jwtSecret = 'jwt_prompt_builder_secret_1234567890';
   const databaseUrl = 'postgresql://doculens:prompt_builder_db_password@localhost:5432/doculens';
   const authHeader = 'Bearer prompt_builder_auth_header_secret_1234567890';
@@ -352,7 +352,7 @@ test('live-call budget gate rejects over-budget requests before MiniMax transpor
 
   const transportCalls = [];
   const provider = createMiniMaxProvider({
-    apiKey: 'sk-minimax_budget_canary_1234567890',
+    apiKey: 'minimax-test-key-budget-canary',
     baseUrl: 'https://api.minimax.io/v1',
     model: 'MiniMax-M3',
     budget: { maxLiveCalls: 0, usedLiveCalls: 0 },
@@ -385,7 +385,7 @@ test('live-call budget consumes failed transport attempts before allowing anothe
 
   const transportCalls = [];
   const provider = createMiniMaxProvider({
-    apiKey: 'sk-minimax_failed_budget_canary_1234567890',
+    apiKey: 'minimax-test-key-failed-budget-canary',
     baseUrl: 'https://api.minimax.io/v1',
     model: 'MiniMax-M3',
     budget: { maxLiveCalls: 1, usedLiveCalls: 0 },
@@ -423,7 +423,7 @@ test('central redaction removes MiniMax keys, JWT/database/auth secrets, raw doc
     'central redaction utility',
   );
 
-  const minimaxApiKey = 'sk-minimax_redaction_canary_1234567890';
+  const minimaxApiKey = 'minimax-test-key-redaction-canary';
   const jwtSecret = 'jwt_redaction_secret_with_entropy_1234567890';
   const databaseUrl = 'postgresql://doculens:redaction_db_password@localhost:5432/doculens';
   const authHeader = 'Bearer redaction_auth_header_secret_1234567890';
@@ -509,7 +509,7 @@ test('MiniMax live smoke command requires opt-in and API key, validates response
     const logs = [];
     await assert.rejects(
       () => runMiniMaxLiveSmoke({
-        env: { MINIMAX_API_KEY: 'sk-minimax_live_canary_1234567890' },
+        env: { MINIMAX_API_KEY: 'minimax-test-key-live-canary' },
         transport: async (request) => {
           transportCalls.push(request);
           return { id: 'unexpected' };
@@ -519,7 +519,7 @@ test('MiniMax live smoke command requires opt-in and API key, validates response
       /opt[- ]?in|DOCULENS_LIVE_MINIMAX|live/i,
     );
     assert.deepEqual(transportCalls, [], 'live smoke must not touch transport without explicit live opt-in');
-    assert.equal(logs.join('\n').includes('sk-minimax_live_canary_1234567890'), false, 'failed opt-in logs must redact API keys');
+    assert.equal(logs.join('\n').includes('minimax-test-key-live-canary'), false, 'failed opt-in logs must redact API keys');
   });
 
   await t.test('fails closed without MINIMAX_API_KEY before transport', async () => {
@@ -539,7 +539,7 @@ test('MiniMax live smoke command requires opt-in and API key, validates response
   });
 
   await t.test('rejects non-HTTPS MINIMAX_BASE_URL before transport or key disclosure', async () => {
-    const apiKey = 'sk-minimax_live_http_canary_1234567890';
+    const apiKey = 'minimax-test-key-live-http-canary';
     const transportCalls = [];
     const logs = [];
     await assert.rejects(
@@ -557,7 +557,7 @@ test('MiniMax live smoke command requires opt-in and API key, validates response
     assert.equal(logs.join('\n').includes(apiKey), false, 'non-HTTPS rejection logs must not disclose API keys');
   });
   await t.test('uses injectable transport for deterministic response-shape validation without logging secrets', async () => {
-    const apiKey = 'sk-minimax_live_shape_canary_1234567890';
+    const apiKey = 'minimax-test-key-live-shape-canary';
     const providerResponse = 'PROVIDER_RESPONSE_CANARY: deterministic live smoke response';
     const transportCalls = [];
     const logs = [];

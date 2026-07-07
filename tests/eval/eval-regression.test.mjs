@@ -161,7 +161,7 @@ test('npm run eval produces reviewer-readable pass/skip/fail evidence for PR8 ev
 });
 
 test('live MiniMax eval gate reaches provider transport before budget rejection', async (t) => {
-  const liveApiKey = 'sk-minimax_live_eval_budget_1234567890';
+  const liveApiKey = 'minimax-local-loopback-key';
   const providerRequests = [];
   const server = createServer((request, response) => {
     let body = '';
