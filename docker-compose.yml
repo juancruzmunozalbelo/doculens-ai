@@ -18,6 +18,11 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-doculens}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-doculens}
+      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-lexical_fallback}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local_hashing}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-doculens-local-hashing-v1}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+      EMBEDDING_STRICT: ${EMBEDDING_STRICT:-false}
       AI_PROVIDER: minimax
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL:-https://api.minimax.io/v1}
@@ -29,7 +34,7 @@ services:
       - "3000:3000"
 
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-doculens}
       POSTGRES_USER: ${POSTGRES_USER:-doculens}

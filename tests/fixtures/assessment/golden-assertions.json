@@ -349,7 +349,173 @@
     "MINIMAX_API_KEY",
     "AWS_SECRET_ACCESS_KEY"
   ],
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "retrievalEvalCases": [
+    {
+      "category": "golden-backend",
+      "question": "What backend requirements does the assessment specify?",
+      "expectedEvidence": [
+        "The backend must expose a REST API",
+        "JWT authentication is expected for protected routes"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "REST API",
+        "JWT",
+        "persist"
+      ]
+    },
+    {
+      "category": "controlled paraphrase",
+      "question": "Which server-side interfaces, sign-in controls, storage layer, and source lookup capabilities does the brief request?",
+      "expectedEvidence": [
+        "The backend must expose a REST API",
+        "source retrieval"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "REST API",
+        "authentication",
+        "source retrieval"
+      ]
+    },
+    {
+      "category": "lexical-negative",
+      "question": "Which reviewer journey and asynchronous feedback surfaces should the applicant implement?",
+      "expectedEvidence": [
+        "The frontend must be implemented in React",
+        "loading states, empty states, error states"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "React",
+        "loading states",
+        "error states"
+      ]
+    },
+    {
+      "category": "cross-tenant closer-vector",
+      "question": "What source-retrieval and ownership evidence must remain scoped to the selected reviewer document?",
+      "expectedEvidence": [
+        "ownership checks",
+        "source retrieval"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "ownership checks",
+        "source retrieval"
+      ],
+      "fixtureNote": "Repository integration tests add the unauthorized closer vector; this eval fixture names the reviewer-facing category and expected in-scope evidence."
+    },
+    {
+      "category": "stale/no-embedding",
+      "question": "What deployment requirements are included?",
+      "expectedEvidence": [
+        "AWS infrastructure described or provisioned using Terraform or CloudFormation",
+        "managed secret stores"
+      ],
+      "expectedAnswerStates": [
+        "grounded",
+        "insufficient_evidence"
+      ],
+      "claimTerms": [
+        "AWS",
+        "Terraform",
+        "secrets"
+      ],
+      "forceMissingChunkEmbeddings": true
+    },
+    {
+      "category": "unsupported",
+      "question": "What is the capital of Argentina?",
+      "expectedEvidence": [],
+      "expectedAnswerStates": [
+        "unsupported"
+      ],
+      "claimTerms": []
+    },
+    {
+      "category": "low-evidence",
+      "question": "What salary should the company offer this candidate?",
+      "expectedEvidence": [],
+      "expectedAnswerStates": [
+        "insufficient_evidence",
+        "unsupported"
+      ],
+      "claimTerms": []
+    },
+    {
+      "category": "adversarial answer claims",
+      "question": "What reliability and evaluation evidence is expected?",
+      "expectedEvidence": [
+        "The project should include targeted tests",
+        "The implementation should fail safely"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "targeted tests",
+        "fail safely"
+      ],
+      "forbiddenClaimTerms": [
+        "multi-region Kubernetes mandate",
+        "SOC 2 certification required"
+      ]
+    },
+    {
+      "category": "backend provenance",
+      "question": "Which evidence proves hybrid retrieval must be repository-backed rather than metadata-only?",
+      "expectedEvidence": [
+        "retrieval-grounded chat",
+        "retrieval policy"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "retrieval-grounded",
+        "retrieval policy"
+      ],
+      "requiresBackendProvenance": "postgresql_repository"
+    },
+    {
+      "category": "citation validity",
+      "question": "How should source-grounded chat cite evidence?",
+      "expectedEvidence": [
+        "The chat answer should cite evidence when retrieved chunks support the response"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "cite evidence",
+        "retrieved chunks"
+      ]
+    },
+    {
+      "category": "score summary",
+      "question": "What targeted tests should cover retrieval and chat answer states?",
+      "expectedEvidence": [
+        "targeted tests for authentication, ownership, ingestion, provider parsing, retrieval policy, chat answer states"
+      ],
+      "expectedAnswerStates": [
+        "grounded"
+      ],
+      "claimTerms": [
+        "retrieval policy",
+        "chat answer states"
+      ]
+    }
+  ],
   "unsupportedQuestions": [
     {
       "expectedDisplayStateKinds": [

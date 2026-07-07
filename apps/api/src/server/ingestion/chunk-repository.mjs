@@ -17,6 +17,11 @@ function assertChunkShape(chunk) {
   if (!Number.isInteger(chunk.tokenEstimate) || chunk.tokenEstimate <= 0) {
     throw new Error('tokenEstimate must be a positive integer');
   }
+  if (chunk.embedding !== undefined && chunk.embedding !== null) {
+    if (!Array.isArray(chunk.embedding) || chunk.embedding.some((value) => !Number.isFinite(Number(value)))) {
+      throw new Error('chunk embedding must be a numeric array');
+    }
+  }
 }
 
 function publicChunk(row) {
@@ -29,6 +34,12 @@ function publicChunk(row) {
     headingPath: [...row.headingPath],
     content: row.content,
     tokenEstimate: row.tokenEstimate,
+    embedding: row.embedding ?? null,
+    embeddingProvider: row.embeddingProvider ?? null,
+    embeddingModel: row.embeddingModel ?? null,
+    embeddingDimensions: row.embeddingDimensions ?? null,
+    embeddingStatus: row.embeddingStatus ?? null,
+    embeddingErrorCode: row.embeddingErrorCode ?? null,
     retrievalMetadata: row.retrievalMetadata ?? {},
     createdAt: row.createdAt,
   };
@@ -83,6 +94,12 @@ export function createInMemoryChunkRepository({ documents } = {}) {
           headingPath: [...chunk.headingPath],
           content: chunk.content,
           tokenEstimate: chunk.tokenEstimate,
+          embedding: Array.isArray(chunk.embedding) ? [...chunk.embedding] : null,
+          embeddingProvider: chunk.embeddingProvider ?? null,
+          embeddingModel: chunk.embeddingModel ?? null,
+          embeddingDimensions: chunk.embeddingDimensions ?? null,
+          embeddingStatus: chunk.embeddingStatus ?? null,
+          embeddingErrorCode: chunk.embeddingErrorCode ?? null,
           retrievalMetadata: chunk.retrievalMetadata ?? {},
           createdAt: new Date().toISOString(),
         });
