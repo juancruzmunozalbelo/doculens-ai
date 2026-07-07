@@ -150,7 +150,7 @@ test('AWS app container build path packages the React UI and Node API with a hea
   assert.match(dockerfile, /src\/server|scripts\/dev\.mjs|node\s+scripts\//, `${dockerfilePath} must include the Node API runtime path`);
   assert.match(dockerfile, /EXPOSE\s+\d+/, `${dockerfilePath} must expose the single app container port used by ECS and the ALB target group`);
 
-  const { createDocuLensServer } = await import(path.join(repoRoot, 'src/server/index.mjs'));
+  const { createDocuLensServer } = await import(path.join(repoRoot, 'apps/api/src/server/index.mjs'));
   const server = createDocuLensServer({
     aiProvider: 'minimax',
     databaseUrl: 'postgresql://health-user:health-pass@127.0.0.1:5432/health-db',

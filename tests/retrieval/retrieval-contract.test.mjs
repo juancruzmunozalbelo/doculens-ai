@@ -40,7 +40,7 @@ function compactChunk(chunk) {
 
 test('RetrievalProvider returns owner-scoped top-k chunks with citation-ready metadata from the configured preferred backend', async () => {
   const { createRetrievalProvider } = await importRequired(
-    'src/server/retrieval/provider.mjs',
+    'apps/api/src/server/retrieval/provider.mjs',
     ['createRetrievalProvider'],
     'Retrieval provider contract',
   );
@@ -148,7 +148,7 @@ test('RetrievalProvider returns owner-scoped top-k chunks with citation-ready me
 
 test('RetrievalProvider does not expose backend rows outside the requested document and owner scope', async (t) => {
   const { createRetrievalProvider } = await importRequired(
-    'src/server/retrieval/provider.mjs',
+    'apps/api/src/server/retrieval/provider.mjs',
     ['createRetrievalProvider'],
     'Retrieval provider row ownership contract',
   );
@@ -264,7 +264,7 @@ test('RetrievalProvider does not expose backend rows outside the requested docum
 
 test('RetrievalProvider filters scope before applying top-k limits so cross-scope rows cannot suppress valid evidence', async (t) => {
   const { createRetrievalProvider } = await importRequired(
-    'src/server/retrieval/provider.mjs',
+    'apps/api/src/server/retrieval/provider.mjs',
     ['createRetrievalProvider'],
     'Retrieval provider scope-before-limit contract',
   );
@@ -388,7 +388,7 @@ test('RetrievalProvider filters scope before applying top-k limits so cross-scop
 
 test('RetrievalProvider uses lexical retrieval only as an explicit lexical_fallback when vector or embedding retrieval is unavailable', async () => {
   const { createRetrievalProvider } = await importRequired(
-    'src/server/retrieval/provider.mjs',
+    'apps/api/src/server/retrieval/provider.mjs',
     ['createRetrievalProvider'],
     'Retrieval provider lexical fallback contract',
   );
@@ -449,7 +449,7 @@ test('RetrievalProvider uses lexical retrieval only as an explicit lexical_fallb
 
 test('deterministic coverage policy returns rag, fallback, or unsupported with auditable low-coverage and global-question reasons', async (t) => {
   const { decideRetrievalStrategy } = await importRequired(
-    'src/server/retrieval/policy.mjs',
+    'apps/api/src/server/retrieval/policy.mjs',
     ['decideRetrievalStrategy'],
     'Retrieval coverage policy',
   );
@@ -642,7 +642,7 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
 
 test('chat response metadata exposes retrieval evidence, backend, strategy, fallback reason, and score summary without raw chunk text', async () => {
   const { buildRetrievalMetadata } = await importRequired(
-    'src/server/retrieval/metadata.mjs',
+    'apps/api/src/server/retrieval/metadata.mjs',
     ['buildRetrievalMetadata'],
     'Retrieval response metadata contract',
   );

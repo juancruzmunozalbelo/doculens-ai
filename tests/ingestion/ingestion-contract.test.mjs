@@ -129,7 +129,7 @@ function createRecordingChunkRepository({ failAfterFirstWrite = false } = {}) {
 
 test('Markdown/text normalization preserves headings while removing ingestion-hostile whitespace drift', async () => {
   const { normalizeDocumentText } = await importRequired(
-    'src/server/ingestion/normalization.mjs',
+    'apps/api/src/server/ingestion/normalization.mjs',
     ['normalizeDocumentText'],
     'Markdown/text normalization',
   );
@@ -145,12 +145,12 @@ test('Markdown/text normalization preserves headings while removing ingestion-ho
 
 test('section-aware chunking emits deterministic owner-independent metadata for headings, indexes, stable IDs, and token estimates', async () => {
   const { normalizeDocumentText } = await importRequired(
-    'src/server/ingestion/normalization.mjs',
+    'apps/api/src/server/ingestion/normalization.mjs',
     ['normalizeDocumentText'],
     'Markdown/text normalization for chunk input',
   );
   const { chunkDocument } = await importRequired(
-    'src/server/ingestion/chunking.mjs',
+    'apps/api/src/server/ingestion/chunking.mjs',
     ['chunkDocument'],
     'Section-aware chunking',
   );
@@ -192,7 +192,7 @@ Either party may terminate after uncured material breach.`);
 
 test('document create pipeline normalizes content, persists chunks, and lists only owner-authorized chunk metadata', async () => {
   const { createDocumentService } = await importRequired(
-    'src/server/documents/service.mjs',
+    'apps/api/src/server/documents/service.mjs',
     ['createDocumentService'],
     'Document service ingestion pipeline',
   );
@@ -248,7 +248,7 @@ test('document create pipeline normalizes content, persists chunks, and lists on
 
 test('failed chunk persistence leaves no partially retrievable chunks and either rolls back or marks the document failed', async () => {
   const { createDocumentService } = await importRequired(
-    'src/server/documents/service.mjs',
+    'apps/api/src/server/documents/service.mjs',
     ['createDocumentService'],
     'Document service failed-ingestion behavior',
   );
@@ -283,7 +283,7 @@ test('failed chunk persistence leaves no partially retrievable chunks and either
 
 test('chunk persistence contract rejects duplicate stable IDs, orphan documents, and cross-owner writes before retrieval can expose data', async () => {
   const { createInMemoryChunkRepository } = await importRequired(
-    'src/server/ingestion/chunk-repository.mjs',
+    'apps/api/src/server/ingestion/chunk-repository.mjs',
     ['createInMemoryChunkRepository'],
     'Chunk repository integrity contract',
   );

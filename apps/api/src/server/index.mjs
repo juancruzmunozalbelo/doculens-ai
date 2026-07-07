@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadServerConfigSync } from './config/env.mjs';
@@ -14,7 +15,7 @@ import { createMiniMaxProvider, MINIMAX_DEFAULTS } from './ai/minimax-provider.m
 import { createDocumentAiService } from './chat/service.mjs';
 import { createRetrievalProvider } from './retrieval/provider.mjs';
 import { createPostgreSqlRepositories } from './postgresql/repositories.mjs';
-import { redactSecrets } from './security/redact.mjs';
+import { createStructuredLogger, normalizeRequestId, safeLogger } from './logging/logger.mjs';
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_SERVER_MINIMAX_BUDGET = Object.freeze({
@@ -60,6 +61,64 @@ function sendJson(response, statusCode, payload) {
 function sendNoContent(response) {
   response.writeHead(204);
   response.end();
+}
+
+function instrumentResponse(response) {
+  const originalWriteHead = response.writeHead.bind(response);
+  const originalEnd = response.end.bind(response);
+  let bodyBytes = 0;
+
+  response.writeHead = function writeHead(statusCode, ...args) {
+    response.statusCode = statusCode;
+    return originalWriteHead(statusCode, ...args);
+  };
+
+  response.end = function end(chunk, ...args) {
+    if (typeof chunk === 'string') {
+      bodyBytes += Buffer.byteLength(chunk);
+    } else if (Buffer.isBuffer(chunk)) {
+      bodyBytes += chunk.length;
+    }
+    return originalEnd(chunk, ...args);
+  };
+
+  return {
+    bodyBytes() {
+      return bodyBytes;
+    },
+    statusCode() {
+      return response.statusCode || 200;
+    },
+  };
+}
+
+function requestHeader(request, name) {
+  const value = request.headers[name.toLowerCase()];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function logHttpRequest(logger, entry) {
+  const logEntry = {
+    event: 'http_request',
+    requestId: entry.requestId,
+    method: entry.method,
+    route: entry.route,
+    statusCode: entry.statusCode,
+    durationMs: entry.durationMs,
+    responseBytes: entry.responseBytes,
+  };
+  if (entry.error) {
+    logEntry.error = '[REDACTED_ERROR]';
+    logEntry.errorName = entry.error.name;
+    logEntry.errorStatusCode = entry.error.statusCode;
+  }
+  if (entry.statusCode >= 500) {
+    logger.error(logEntry);
+  } else if (entry.statusCode >= 400) {
+    logger.warn(logEntry);
+  } else {
+    logger.info(logEntry);
+  }
 }
 
 function safeErrorMessage(statusCode) {
@@ -302,12 +361,22 @@ async function requireDocumentChildAuthorization(services, { currentUser, docume
 }
 
 export function createDocuLensServer(config, overrides = {}) {
+  const logger = safeLogger(overrides.logger ?? config.logger ?? createStructuredLogger({
+    secrets: [config.databaseUrl, config.jwtSecret, config.minimax?.apiKey],
+  }));
   const services = buildServices(config, overrides);
 
   return createServer(async (request, response) => {
+    const startedAt = performance.now();
+    const instrument = instrumentResponse(response);
+    const requestId = normalizeRequestId(requestHeader(request, 'x-request-id'), randomUUID());
+    response.setHeader('x-request-id', requestId);
+    let pathname = routePath(request);
+    let method = request.method ?? 'GET';
+    let caughtError = null;
     try {
-      const pathname = routePath(request);
-      const method = request.method ?? 'GET';
+      pathname = routePath(request);
+      method = request.method ?? 'GET';
 
       if (method === 'GET' && pathname === '/health') {
         sendJson(response, 200, { ok: true, service: 'doculens-ai', provider: config.aiProvider });
@@ -494,8 +563,19 @@ export function createDocuLensServer(config, overrides = {}) {
 
       sendJson(response, 404, { error: 'Not found' });
     } catch (error) {
+      caughtError = error;
       const statusCode = error instanceof DocumentAccessError ? error.statusCode : Number(error.statusCode) || 500;
       sendJson(response, statusCode, { error: safeErrorMessage(statusCode) });
+    } finally {
+      logHttpRequest(logger, {
+        requestId,
+        method,
+        route: pathname,
+        statusCode: instrument.statusCode(),
+        durationMs: Math.max(0, performance.now() - startedAt),
+        responseBytes: instrument.bodyBytes(),
+        error: caughtError,
+      });
     }
   });
 }
@@ -505,9 +585,10 @@ export function startServer(env = process.env) {
   const staticDir = env.DOCULENS_STATIC_DIR || null;
   const port = Number(env.PORT || 3000);
   const host = env.HOST || '127.0.0.1';
-  const server = createDocuLensServer({ ...config, staticDir });
+  const logger = createStructuredLogger({ secrets: [config.databaseUrl, config.jwtSecret, config.minimax.apiKey] });
+  const server = createDocuLensServer({ ...config, staticDir, logger });
   server.listen(port, host, () => {
-    console.log(redactSecrets(`DocuLens AI server listening on http://${host}:${port}`, [config.databaseUrl, config.jwtSecret, config.minimax.apiKey]));
+    logger.info({ event: 'server_listening', host, port, service: 'doculens-ai' });
   });
   return server;
 }

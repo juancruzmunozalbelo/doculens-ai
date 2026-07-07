@@ -1,0 +1,59 @@
+name: AWS Deploy Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_uri:
+        description: Reviewed immutable app image URI or digest to deploy
+        required: true
+        type: string
+      expected_account:
+        description: Expected AWS demo account id
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-demo-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: aws-demo
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Create ephemeral named AWS profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
+          aws configure set region "${{ vars.AWS_REGION || 'us-east-1' }}" --profile doculens-demo
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+      - name: Install Node for context guard
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Guard AWS context and free demo budget
+        run: |
+          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "${{ vars.AWS_REGION || 'us-east-1' }}" --expected-account "${{ inputs.expected_account }}"
+          test "${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}" = "1"
+          test "${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}" = "db.t4g.micro"
+      - name: Terraform plan tiny demo capacity
+        run: terraform -chdir=infra/aws plan -out=doculens-demo.tfplan -var "image_uri=${{ inputs.image_uri }}" -var "desired_count=${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}" -var "db_instance_class=${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}" -var "db_allocated_storage=${{ vars.AWS_DEMO_DB_ALLOCATED_STORAGE || '20' }}"
+      - name: Terraform apply reviewed plan
+        run: terraform -chdir=infra/aws apply -auto-approve doculens-demo.tfplan
+      - name: Smoke ALB health
+        run: curl -fsS "$(terraform -chdir=infra/aws output -raw health_url)"

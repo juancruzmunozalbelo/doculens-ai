@@ -1,0 +1,60 @@
+name: AWS Rollback Demo
+
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_target:
+        description: Reviewed ECS task definition revision or image_uri to restore
+        required: true
+        type: string
+      cluster:
+        description: ECS cluster name
+        required: true
+        type: string
+      service:
+        description: ECS service name
+        required: true
+        type: string
+      expected_account:
+        description: Expected AWS demo account id
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-demo-rollback
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment:
+      name: aws-demo
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEMO_ROLLBACK_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - name: Create ephemeral named AWS profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
+          aws configure set region "${{ vars.AWS_REGION || 'us-east-1' }}" --profile doculens-demo
+      - name: Install Node for context guard
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Guard AWS context
+        run: node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "${{ vars.AWS_REGION || 'us-east-1' }}" --expected-account "${{ inputs.expected_account }}"
+      - name: Roll back ECS service to reviewed target
+        run: aws ecs update-service --cluster "${{ inputs.cluster }}" --service "${{ inputs.service }}" --task-definition "${{ inputs.rollback_target }}" --region "${{ vars.AWS_REGION || 'us-east-1' }}"
+      - name: Verify ECS service after rollback
+        run: aws ecs describe-services --cluster "${{ inputs.cluster }}" --services "${{ inputs.service }}" --region "${{ vars.AWS_REGION || 'us-east-1' }}"

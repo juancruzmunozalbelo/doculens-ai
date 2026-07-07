@@ -63,14 +63,14 @@ flowchart TD
 
 ### Backend boundaries
 
-- `src/server/index.mjs` owns HTTP routing, `/health`, JSON body limits, auth wrapping, static asset serving via `DOCULENS_STATIC_DIR`, and safe error responses.
-- `src/server/auth/` owns password hashing, registration/login, JWT issue/verification, and current-user resolution.
-- `src/server/documents/` owns owner-scoped document APIs and child-resource authorization.
-- `src/server/ingestion/` owns normalization, chunking, and chunk repository contracts.
-- `src/server/retrieval/` owns top-k retrieval, backend metadata, score summaries, coverage strategy, fallback reasons, and unsupported classification.
-- `src/server/ai/` owns provider abstraction and MiniMax M3 transport/budget behavior.
-- `src/server/chat/` owns analysis/chat orchestration, prompt construction, citation validation, and persisted metadata.
-- `src/server/security/redact.mjs` owns centralized redaction for API keys, JWTs, database URLs/passwords, authorization headers, raw document text, prompts, provider responses, and stack traces.
+- `apps/api/src/server/index.mjs` owns HTTP routing, `/health`, JSON body limits, auth wrapping, static asset serving via `DOCULENS_STATIC_DIR`, and safe error responses.
+- `apps/api/src/server/auth/` owns password hashing, registration/login, JWT issue/verification, and current-user resolution.
+- `apps/api/src/server/documents/` owns owner-scoped document APIs and child-resource authorization.
+- `apps/api/src/server/ingestion/` owns normalization, chunking, and chunk repository contracts.
+- `apps/api/src/server/retrieval/` owns top-k retrieval, backend metadata, score summaries, coverage strategy, fallback reasons, and unsupported classification.
+- `apps/api/src/server/ai/` owns provider abstraction and MiniMax M3 transport/budget behavior.
+- `apps/api/src/server/chat/` owns analysis/chat orchestration, prompt construction, citation validation, and persisted metadata.
+- `apps/api/src/server/security/redact.mjs` owns centralized redaction for API keys, JWTs, database URLs/passwords, authorization headers, raw document text, prompts, provider responses, and stack traces.
 
 ### Persistence
 

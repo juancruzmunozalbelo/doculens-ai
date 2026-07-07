@@ -48,7 +48,7 @@ function countOccurrences(value, needle) {
 
 test('MiniMaxProvider satisfies the AIProvider contract and returns auditable provider/model/prompt/context metadata', async () => {
   const { createMiniMaxProvider } = await importRequired(
-    'src/server/ai/minimax-provider.mjs',
+    'apps/api/src/server/ai/minimax-provider.mjs',
     ['createMiniMaxProvider'],
     'MiniMax provider',
   );
@@ -123,7 +123,7 @@ test('MiniMaxProvider satisfies the AIProvider contract and returns auditable pr
 
 test('prompt registry exposes versioned prompt IDs for analysis, chat, fallback, unsupported, and prompt-injection handling', async (t) => {
   const { getPromptDefinition } = await importRequired(
-    'src/server/ai/prompts/registry.mjs',
+    'apps/api/src/server/ai/prompts/registry.mjs',
     ['getPromptDefinition'],
     'AI prompt registry',
   );
@@ -145,7 +145,7 @@ test('prompt registry exposes versioned prompt IDs for analysis, chat, fallback,
 
 test('prompt builder wraps untrusted document and chunk text in delimiters, neutralizes prompt injection, and excludes secrets', async () => {
   const { buildPromptMessages } = await importRequired(
-    'src/server/ai/prompts/builder.mjs',
+    'apps/api/src/server/ai/prompts/builder.mjs',
     ['buildPromptMessages'],
     'AI prompt builder',
   );
@@ -195,7 +195,7 @@ test('prompt builder wraps untrusted document and chunk text in delimiters, neut
 
 test('prompt builder redacts configured secrets from document and chunk attributes before provider transfer', async () => {
   const { buildPromptMessages } = await importRequired(
-    'src/server/ai/prompts/builder.mjs',
+    'apps/api/src/server/ai/prompts/builder.mjs',
     ['buildPromptMessages'],
     'AI prompt builder',
   );
@@ -237,7 +237,7 @@ test('prompt builder redacts configured secrets from document and chunk attribut
 
 test('prompt builder escapes untrusted delimiter text so evidence cannot close prompt wrappers', async () => {
   const { buildPromptMessages } = await importRequired(
-    'src/server/ai/prompts/builder.mjs',
+    'apps/api/src/server/ai/prompts/builder.mjs',
     ['buildPromptMessages'],
     'AI prompt builder',
   );
@@ -279,7 +279,7 @@ test('prompt builder escapes untrusted delimiter text so evidence cannot close p
 
 test('live-call budget gate rejects over-budget requests before MiniMax transport invocation', async () => {
   const { createMiniMaxProvider } = await importRequired(
-    'src/server/ai/minimax-provider.mjs',
+    'apps/api/src/server/ai/minimax-provider.mjs',
     ['createMiniMaxProvider'],
     'MiniMax provider',
   );
@@ -312,7 +312,7 @@ test('live-call budget gate rejects over-budget requests before MiniMax transpor
 
 test('live-call budget consumes failed transport attempts before allowing another MiniMax request', async () => {
   const { createMiniMaxProvider } = await importRequired(
-    'src/server/ai/minimax-provider.mjs',
+    'apps/api/src/server/ai/minimax-provider.mjs',
     ['createMiniMaxProvider'],
     'MiniMax provider',
   );
@@ -352,7 +352,7 @@ test('live-call budget consumes failed transport attempts before allowing anothe
 
 test('central redaction removes MiniMax keys, JWT/database/auth secrets, raw document text, full prompts, provider responses, and stack traces', async () => {
   const { redactSecrets } = await importRequired(
-    'src/server/security/redact.mjs',
+    'apps/api/src/server/security/redact.mjs',
     ['redactSecrets'],
     'central redaction utility',
   );
@@ -364,7 +364,7 @@ test('central redaction removes MiniMax keys, JWT/database/auth secrets, raw doc
   const rawDocumentText = 'RAW_DOCUMENT_CANARY: acquisition price is $123,456 and should never appear in logs';
   const fullPrompt = 'FULL_PROMPT_CANARY: system plus untrusted raw document text and question';
   const providerResponse = 'PROVIDER_RESPONSE_CANARY: MiniMax returned confidential analysis text';
-  const stackTrace = 'Error: MiniMax provider failed\n    at sendLiveCall (src/server/ai/minimax-provider.mjs:42:13)\n    at async answerQuestion (src/server/ai/minimax-provider.mjs:77:5)';
+  const stackTrace = 'Error: MiniMax provider failed\n    at sendLiveCall (apps/api/src/server/ai/minimax-provider.mjs:42:13)\n    at async answerQuestion (apps/api/src/server/ai/minimax-provider.mjs:77:5)';
 
   const redacted = redactSecrets(
     {
@@ -407,7 +407,7 @@ test('central redaction removes MiniMax keys, JWT/database/auth secrets, raw doc
 
 test('central redaction removes entire quoted raw document, prompt, and provider response fields with escaped quotes', async () => {
   const { redactSecrets } = await importRequired(
-    'src/server/security/redact.mjs',
+    'apps/api/src/server/security/redact.mjs',
     ['redactSecrets'],
     'central redaction utility',
   );
