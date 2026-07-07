@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -25,6 +27,34 @@ async function importRequired(relativePath, exportNames, purpose) {
     }
     throw error;
   }
+}
+
+async function installRecordingPsqlFake(t) {
+  const originalPath = process.env.PATH;
+  const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'doculens-psql-argv-'));
+  t.after(async () => {
+    process.env.PATH = originalPath;
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  });
+
+  const argvPath = path.join(temporaryDirectory, 'argv.json');
+  const psqlPath = path.join(temporaryDirectory, 'psql');
+  await writeFile(
+    psqlPath,
+    `#!/usr/bin/env node
+const { writeFileSync } = require('node:fs');
+writeFileSync(${JSON.stringify(argvPath)}, JSON.stringify(process.argv.slice(2)), 'utf8');
+process.stdout.write('null\\n');
+`,
+    { mode: 0o755 },
+  );
+  process.env.PATH = originalPath ? `${temporaryDirectory}${path.delimiter}${originalPath}` : temporaryDirectory;
+
+  return {
+    async readSpawnedArgs() {
+      return JSON.parse(await readFile(argvPath, 'utf8'));
+    },
+  };
 }
 
 function testConfig() {
@@ -246,6 +276,32 @@ test('production DATABASE_URL server construction selects PostgreSQL repositorie
     repositorySelections[0]?.usesInMemoryRepositories,
     false,
     'in-memory repositories must be reserved for explicit overrides or test mode',
+  );
+});
+
+test('PostgreSQL query helper keeps DATABASE_URL credentials out of spawned psql argv', async (t) => {
+  const createPostgreSqlRepositories = await importRequired(
+    'src/server/postgresql/repositories.mjs',
+    ['createPostgreSqlRepositories'],
+    'PostgreSQL repository factory',
+  );
+  const psql = await installRecordingPsqlFake(t);
+  const databasePassword = 'argv_password_canary_for_regression';
+  const databaseUrl = `postgresql://argv_user:${databasePassword}@127.0.0.1:5432/doculens_argv_canary`;
+
+  const repositories = createPostgreSqlRepositories({ databaseUrl });
+  await repositories.users.findByEmail('argv-canary@example.test');
+
+  const spawnedArgs = await psql.readSpawnedArgs();
+  assert.equal(
+    spawnedArgs.includes(databaseUrl),
+    false,
+    'psql argv must not include the full DATABASE_URL because process listings expose argv to other users',
+  );
+  assert.equal(
+    spawnedArgs.some((arg) => String(arg).includes(databasePassword)),
+    false,
+    'psql argv must not include the database password canary in any argument',
   );
 });
 

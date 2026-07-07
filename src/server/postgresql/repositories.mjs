@@ -21,9 +21,36 @@ function parsePsqlJson(stdout) {
   return JSON.parse(trimmed);
 }
 
+function psqlEnvironment(databaseUrl) {
+  const url = new URL(databaseUrl);
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  if (!url.hostname || databaseName === '') {
+    throw new Error('DATABASE_URL must include PostgreSQL host and database name');
+  }
+
+  const env = {
+    ...process.env,
+    PGDATABASE: databaseName,
+    PGHOST: url.hostname,
+  };
+  if (url.port) {
+    env.PGPORT = url.port;
+  }
+  if (url.username) {
+    env.PGUSER = decodeURIComponent(url.username);
+  }
+  if (url.password) {
+    env.PGPASSWORD = decodeURIComponent(url.password);
+  }
+  const sslMode = url.searchParams.get('sslmode');
+  if (sslMode) {
+    env.PGSSLMODE = sslMode;
+  }
+  return env;
+}
+
 async function queryJson({ databaseUrl, sql, payload }) {
   const args = [
-    databaseUrl,
     '--no-align',
     '--tuples-only',
     '--quiet',
@@ -34,9 +61,10 @@ async function queryJson({ databaseUrl, sql, payload }) {
     '--command',
     sql,
   ];
+  const env = psqlEnvironment(databaseUrl);
 
   return await new Promise((resolve, reject) => {
-    const child = spawn('psql', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('psql', args, { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
 
