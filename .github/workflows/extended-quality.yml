@@ -1,0 +1,121 @@
+name: Extended Quality
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Extended suite to run
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - e2e
+          - eval
+          - docker
+          - markitdown
+  schedule:
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-quality-${{ github.ref }}-${{ inputs.suite || 'schedule' }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  playwright_e2e:
+    name: Playwright E2E
+    if: ${{ github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'e2e' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Chromium prerequisites
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright E2E
+        run: npm run test:e2e
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 5
+
+  eval_regressions:
+    name: Eval Regressions
+    if: ${{ github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'eval' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run eval regressions
+        run: npm run test:eval
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-regressions
+          path: reports/eval
+          if-no-files-found: ignore
+          retention-days: 5
+
+  docker_compose_contracts:
+    name: Docker Compose Contracts
+    if: ${{ github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'docker' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Docker Compose contracts
+        run: npm run test:docker
+
+  markitdown_smoke:
+    name: MarkItDown Smoke
+    if: ${{ github.event_name == 'schedule' || inputs.suite == 'all' || inputs.suite == 'markitdown' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run full MarkItDown smoke
+        run: npm run smoke:markitdown

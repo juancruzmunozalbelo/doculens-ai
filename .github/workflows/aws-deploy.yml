@@ -1,15 +1,16 @@
-name: AWS Deploy Demo
+name: AWS Release Deploy Demo
 
 on:
   workflow_dispatch:
     inputs:
-      image_uri:
-        description: Reviewed immutable app image URI or digest to deploy
-        required: true
-        type: string
       expected_account:
         description: Expected AWS demo account id
         required: true
+        type: string
+      break_glass_image_digest:
+        description: Optional break-glass ECR image digest URI for this commit; default path builds and pushes Dockerfile.aws in this run
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -20,27 +21,178 @@ concurrency:
   group: aws-demo-deploy
   cancel-in-progress: false
 
+env:
+  NODE_VERSION: '22'
+  TERRAFORM_VERSION: '1.8.5'
+  AWS_REGION_VALUE: ${{ vars.AWS_REGION || 'us-east-1' }}
+  ECR_REPOSITORY: ${{ vars.AWS_DEMO_ECR_REPOSITORY }}
+  EXPECTED_ACCOUNT: ${{ inputs.expected_account }}
+  BREAK_GLASS_IMAGE_DIGEST: ${{ inputs.break_glass_image_digest }}
+  DESIRED_COUNT: ${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}
+  DB_INSTANCE_CLASS: ${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}
+  DB_ALLOCATED_STORAGE: ${{ vars.AWS_DEMO_DB_ALLOCATED_STORAGE || '20' }}
+  TF_BACKEND_BUCKET: ${{ vars.AWS_DEMO_TF_STATE_BUCKET }}
+  TF_BACKEND_TABLE: ${{ vars.AWS_DEMO_TF_LOCK_TABLE }}
+  TF_BACKEND_KEY: ${{ vars.AWS_DEMO_TF_STATE_KEY || 'doculens-demo/terraform.tfstate' }}
+  DATABASE_URL_SECRET_ARN: ${{ vars.AWS_DEMO_DATABASE_URL_SECRET_ARN }}
+  JWT_SECRET_ARN: ${{ vars.AWS_DEMO_JWT_SECRET_ARN }}
+  MINIMAX_API_KEY_SECRET_ARN: ${{ vars.AWS_DEMO_MINIMAX_API_KEY_SECRET_ARN }}
+  AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
+
 jobs:
-  deploy:
+  release_image:
+    name: AWS Image Release
+    if: ${{ inputs.break_glass_image_digest == '' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: aws-demo
+    timeout-minutes: 30
+    outputs:
+      image_uri: ${{ steps.capture_digest.outputs.image_uri }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_VALUE }}
+      - name: Create ephemeral named AWS profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
+          aws configure set region "$AWS_REGION_VALUE" --profile doculens-demo
+      - name: Guard AWS context and release inputs
+        run: |
+          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
+          test -n "$ECR_REPOSITORY"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          DEPLOY_ROLE_NAME="${AWS_DEPLOY_ROLE_ARN##*/}"
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text --region "$AWS_REGION_VALUE")
+          case "$CALLER_ARN" in
+            arn:aws:sts::*:assumed-role/"$DEPLOY_ROLE_NAME"/*) ;;
+            *) echo "Caller identity does not match deploy role $AWS_DEPLOY_ROLE_ARN" >&2; exit 2 ;;
+          esac
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build Dockerfile.aws image for commit SHA
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE_TAG="$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+          docker build -f Dockerfile.aws --label "org.opencontainers.image.revision=$GITHUB_SHA" -t "$IMAGE_TAG" .
+          docker push "$IMAGE_TAG"
+      - name: Capture pushed image digest
+        id: capture_digest
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          DIGEST=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$GITHUB_SHA" --query 'imageDetails[0].imageDigest' --output text --region "$AWS_REGION_VALUE")
+          test -n "$DIGEST"
+          test "$DIGEST" != "None"
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY@$DIGEST"
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+          echo "Released immutable image digest for $GITHUB_SHA"
+
+  validate_break_glass:
+    name: Validate Break-glass Image Digest
+    if: ${{ inputs.break_glass_image_digest != '' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: aws-demo
+    timeout-minutes: 20
+    outputs:
+      image_uri: ${{ steps.validate_digest.outputs.image_uri }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_VALUE }}
+      - name: Create ephemeral named AWS profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
+          aws configure set region "$AWS_REGION_VALUE" --profile doculens-demo
+      - name: Guard AWS context and break-glass inputs
+        run: |
+          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
+          test -n "$ECR_REPOSITORY"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          DEPLOY_ROLE_NAME="${AWS_DEPLOY_ROLE_ARN##*/}"
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text --region "$AWS_REGION_VALUE")
+          case "$CALLER_ARN" in
+            arn:aws:sts::*:assumed-role/"$DEPLOY_ROLE_NAME"/*) ;;
+            *) echo "Caller identity does not match deploy role $AWS_DEPLOY_ROLE_ARN" >&2; exit 2 ;;
+          esac
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Validate break-glass repository ownership and source revision
+        id: validate_digest
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          case "$BREAK_GLASS_IMAGE_DIGEST" in
+            "$ECR_REGISTRY/$ECR_REPOSITORY"@sha256:*) ;;
+            *) echo "Break-glass image must be an immutable digest in $ECR_REGISTRY/$ECR_REPOSITORY" >&2; exit 2 ;;
+          esac
+          DIGEST="${BREAK_GLASS_IMAGE_DIGEST##*@}"
+          aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageDigest="$DIGEST" --query 'imageDetails[0].imageDigest' --output text --region "$AWS_REGION_VALUE" >/dev/null
+          docker pull "$BREAK_GLASS_IMAGE_DIGEST"
+          SOURCE_REVISION=$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$BREAK_GLASS_IMAGE_DIGEST")
+          test "$SOURCE_REVISION" = "$GITHUB_SHA"
+          echo "image_uri=$BREAK_GLASS_IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Validated break-glass digest repository and source revision for $GITHUB_SHA"
+
+  terraform_plan:
+    name: AWS Terraform Plan
+    needs:
+      - release_image
+      - validate_break_glass
+    if: ${{ !cancelled() && (needs.release_image.result == 'success' || needs.validate_break_glass.result == 'success') }}
     runs-on: ubuntu-latest
     environment:
       name: aws-demo
     timeout-minutes: 30
     env:
-      AWS_REGION_VALUE: ${{ vars.AWS_REGION || 'us-east-1' }}
-      EXPECTED_ACCOUNT: ${{ inputs.expected_account }}
-      IMAGE_URI: ${{ inputs.image_uri }}
-      DESIRED_COUNT: ${{ vars.AWS_DEMO_DESIRED_COUNT || '1' }}
-      DB_INSTANCE_CLASS: ${{ vars.AWS_DEMO_DB_INSTANCE_CLASS || 'db.t4g.micro' }}
-      DB_ALLOCATED_STORAGE: ${{ vars.AWS_DEMO_DB_ALLOCATED_STORAGE || '20' }}
+      IMAGE_URI: ${{ needs.release_image.outputs.image_uri || needs.validate_break_glass.outputs.image_uri }}
+    outputs:
+      plan_artifact: doculens-demo-terraform-plan
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Configure AWS credentials through OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION_VALUE }}
       - name: Create ephemeral named AWS profile
         run: |
           aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
@@ -49,20 +201,143 @@ jobs:
           aws configure set region "$AWS_REGION_VALUE" --profile doculens-demo
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
-      - name: Install Node for context guard
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: Guard AWS context, backend, and bounded capacity
+        run: |
+          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
+          test -n "$IMAGE_URI"
+          test -n "$TF_BACKEND_BUCKET"
+          test -n "$TF_BACKEND_TABLE"
+          test -n "$TF_BACKEND_KEY"
+          test "$DESIRED_COUNT" = "1"
+          test "$DB_INSTANCE_CLASS" = "db.t4g.micro"
+          test "$DB_ALLOCATED_STORAGE" = "20"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          DEPLOY_ROLE_NAME="${AWS_DEPLOY_ROLE_ARN##*/}"
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text --region "$AWS_REGION_VALUE")
+          case "$CALLER_ARN" in
+            arn:aws:sts::*:assumed-role/"$DEPLOY_ROLE_NAME"/*) ;;
+            *) echo "Caller identity does not match deploy role $AWS_DEPLOY_ROLE_ARN" >&2; exit 2 ;;
+          esac
+      - name: Verify external secret readiness without printing payloads
+        run: |
+          for secret_name in DATABASE_URL_SECRET_ARN JWT_SECRET_ARN MINIMAX_API_KEY_SECRET_ARN; do
+            secret_arn="${!secret_name}"
+            test -n "$secret_arn"
+            secret_value=$(aws secretsmanager get-secret-value --secret-id "$secret_arn" --version-stage AWSCURRENT --query 'SecretString' --output text --region "$AWS_REGION_VALUE")
+            test -n "$secret_value"
+            test "$secret_value" != "None"
+            echo "$secret_name AWSCURRENT value present"
+          done
+      - name: Terraform format check
+        run: terraform -chdir=infra/aws fmt -check
+      - name: Terraform init with remote state locking
+        run: |
+          terraform -chdir=infra/aws init \
+            -backend-config="bucket=$TF_BACKEND_BUCKET" \
+            -backend-config="key=$TF_BACKEND_KEY" \
+            -backend-config="region=$AWS_REGION_VALUE" \
+            -backend-config="dynamodb_table=$TF_BACKEND_TABLE" \
+            -backend-config="encrypt=true"
+      - name: Terraform validate
+        run: terraform -chdir=infra/aws validate
+      - name: Terraform plan reviewed image digest
+        run: |
+          terraform -chdir=infra/aws plan -input=false -out=doculens-demo.tfplan \
+            -var "aws_region=$AWS_REGION_VALUE" \
+            -var "image_uri=$IMAGE_URI" \
+            -var "desired_count=$DESIRED_COUNT" \
+            -var "db_instance_class=$DB_INSTANCE_CLASS" \
+            -var "db_allocated_storage=$DB_ALLOCATED_STORAGE" \
+            -var "database_url_secret_arn=$DATABASE_URL_SECRET_ARN" \
+            -var "jwt_secret_arn=$JWT_SECRET_ARN" \
+            -var "minimax_api_key_secret_arn=$MINIMAX_API_KEY_SECRET_ARN"
+          terraform -chdir=infra/aws show -no-color doculens-demo.tfplan | sed -E 's/(secret|string|password|token|key)([[:space:]]*=[[:space:]]*)[^[:space:]]+/\1\2[REDACTED]/Ig' > infra/aws/doculens-demo-plan.txt
+      - name: Upload reviewed Terraform plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: doculens-demo-terraform-plan
+          path: |
+            infra/aws/doculens-demo.tfplan
+            infra/aws/doculens-demo-plan.txt
+          retention-days: 5
+
+  terraform_apply:
+    name: AWS Terraform Apply
+    needs: terraform_plan
+    runs-on: ubuntu-latest
+    environment:
+      name: aws-demo
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-      - name: Guard AWS context and free demo budget
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Configure AWS credentials through OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEMO_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION_VALUE }}
+      - name: Create ephemeral named AWS profile
+        run: |
+          aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
+          aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY" --profile doculens-demo
+          aws configure set aws_session_token "$AWS_SESSION_TOKEN" --profile doculens-demo
+          aws configure set region "$AWS_REGION_VALUE" --profile doculens-demo
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: Download reviewed Terraform plan
+        uses: actions/download-artifact@v4
+        with:
+          name: doculens-demo-terraform-plan
+          path: infra/aws
+      - name: Guard AWS context before apply
         run: |
           node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
           test "$DESIRED_COUNT" = "1"
           test "$DB_INSTANCE_CLASS" = "db.t4g.micro"
-      - name: Terraform init
-        run: terraform -chdir=infra/aws init
-      - name: Terraform plan tiny demo capacity
-        run: terraform -chdir=infra/aws plan -out=doculens-demo.tfplan -var "image_uri=$IMAGE_URI" -var "desired_count=$DESIRED_COUNT" -var "db_instance_class=$DB_INSTANCE_CLASS" -var "db_allocated_storage=$DB_ALLOCATED_STORAGE"
-      - name: Terraform apply reviewed plan
-        run: terraform -chdir=infra/aws apply -auto-approve doculens-demo.tfplan
+          test "$DB_ALLOCATED_STORAGE" = "20"
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$TF_BACKEND_BUCKET"
+          test -n "$TF_BACKEND_TABLE"
+          test -n "$TF_BACKEND_KEY"
+          DEPLOY_ROLE_NAME="${AWS_DEPLOY_ROLE_ARN##*/}"
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text --region "$AWS_REGION_VALUE")
+          case "$CALLER_ARN" in
+            arn:aws:sts::*:assumed-role/"$DEPLOY_ROLE_NAME"/*) ;;
+            *) echo "Caller identity does not match deploy role $AWS_DEPLOY_ROLE_ARN" >&2; exit 2 ;;
+          esac
+      - name: Terraform init with remote state locking
+        run: |
+          terraform -chdir=infra/aws init \
+            -backend-config="bucket=$TF_BACKEND_BUCKET" \
+            -backend-config="key=$TF_BACKEND_KEY" \
+            -backend-config="region=$AWS_REGION_VALUE" \
+            -backend-config="dynamodb_table=$TF_BACKEND_TABLE" \
+            -backend-config="encrypt=true"
+      - name: Terraform apply exact reviewed plan
+        run: terraform -chdir=infra/aws apply -input=false -auto-approve doculens-demo.tfplan
       - name: Smoke ALB health
-        run: curl -fsS "$(terraform -chdir=infra/aws output -raw health_url)"
+        run: |
+          HEALTH_URL=$(terraform -chdir=infra/aws output -raw health_url)
+          test -n "$HEALTH_URL"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            echo "ALB health smoke attempt $attempt for $HEALTH_URL"
+            if curl -fsS "$HEALTH_URL"; then
+              echo "ALB health smoke passed for $HEALTH_URL"
+              exit 0
+            fi
+            sleep 15
+          done
+          terraform -chdir=infra/aws output app_url || true
+          terraform -chdir=infra/aws output health_url || true
+          exit 1

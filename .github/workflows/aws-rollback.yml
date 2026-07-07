@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       rollback_target:
-        description: Reviewed ECS task definition revision or image_uri to restore
+        description: ECS task definition ARN or family:revision to restore; raw image URI rollback inputs are rejected
         required: true
         type: string
       cluster:
@@ -19,6 +19,10 @@ on:
         description: Expected AWS demo account id
         required: true
         type: string
+      health_url:
+        description: ALB /health URL to validate after rollback
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -28,18 +32,22 @@ concurrency:
   group: aws-demo-rollback
   cancel-in-progress: false
 
+env:
+  AWS_REGION_VALUE: ${{ vars.AWS_REGION || 'us-east-1' }}
+  EXPECTED_ACCOUNT: ${{ inputs.expected_account }}
+  ROLLBACK_CLUSTER: ${{ inputs.cluster }}
+  ROLLBACK_SERVICE: ${{ inputs.service }}
+  ROLLBACK_TARGET: ${{ inputs.rollback_target }}
+  HEALTH_URL: ${{ inputs.health_url }}
+  AWS_ROLLBACK_ROLE_ARN: ${{ vars.AWS_DEMO_ROLLBACK_ROLE_ARN }}
+
 jobs:
   rollback:
+    name: AWS Rollback
     runs-on: ubuntu-latest
     environment:
       name: aws-demo
-    timeout-minutes: 20
-    env:
-      AWS_REGION_VALUE: ${{ vars.AWS_REGION || 'us-east-1' }}
-      EXPECTED_ACCOUNT: ${{ inputs.expected_account }}
-      ROLLBACK_CLUSTER: ${{ inputs.cluster }}
-      ROLLBACK_SERVICE: ${{ inputs.service }}
-      ROLLBACK_TARGET: ${{ inputs.rollback_target }}
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,7 +55,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEMO_ROLLBACK_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+          aws-region: ${{ env.AWS_REGION_VALUE }}
       - name: Create ephemeral named AWS profile
         run: |
           aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID" --profile doculens-demo
@@ -58,9 +66,54 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Guard AWS context
-        run: node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
-      - name: Roll back ECS service to reviewed target
-        run: aws ecs update-service --cluster "$ROLLBACK_CLUSTER" --service "$ROLLBACK_SERVICE" --task-definition "$ROLLBACK_TARGET" --region "$AWS_REGION_VALUE"
-      - name: Verify ECS service after rollback
-        run: aws ecs describe-services --cluster "$ROLLBACK_CLUSTER" --services "$ROLLBACK_SERVICE" --region "$AWS_REGION_VALUE"
+        run: |
+          node scripts/checks/aws-context-guard.mjs --profile doculens-demo --region "$AWS_REGION_VALUE" --expected-account "$EXPECTED_ACCOUNT"
+          test -n "$AWS_ROLLBACK_ROLE_ARN"
+          ROLLBACK_ROLE_NAME="${AWS_ROLLBACK_ROLE_ARN##*/}"
+          CALLER_ARN=$(aws sts get-caller-identity --query Arn --output text --region "$AWS_REGION_VALUE")
+          case "$CALLER_ARN" in
+            arn:aws:sts::*:assumed-role/"$ROLLBACK_ROLE_NAME"/*) ;;
+            *) echo "Caller identity does not match rollback role $AWS_ROLLBACK_ROLE_ARN" >&2; exit 2 ;;
+          esac
+      - name: Validate rollback target semantics
+        run: |
+          if [[ "$ROLLBACK_TARGET" == *".dkr.ecr."* || "$ROLLBACK_TARGET" == *@sha256:* ]]; then
+            echo "Rollback target must be an ECS task definition ARN or family:revision, not a raw image URI" >&2
+            exit 2
+          fi
+          if [[ "$ROLLBACK_TARGET" =~ ^arn:aws:ecs:[a-z0-9-]+:[0-9]{12}:task-definition/[A-Za-z0-9_-]+:[0-9]+$ ]]; then
+            exit 0
+          fi
+          if [[ "$ROLLBACK_TARGET" =~ ^[A-Za-z0-9_-]+:[0-9]+$ ]]; then
+            exit 0
+          fi
+          echo "Rollback target must be an ECS task definition ARN or family:revision" >&2
+          exit 2
+      - name: Roll back ECS service to reviewed task definition
+        run: aws ecs update-service --cluster "$ROLLBACK_CLUSTER" --service "$ROLLBACK_SERVICE" --task-definition "$ROLLBACK_TARGET" --region "$AWS_REGION_VALUE" >/dev/null
+      - name: Wait for ECS service stability
+        run: aws ecs wait services-stable --cluster "$ROLLBACK_CLUSTER" --services "$ROLLBACK_SERVICE" --region "$AWS_REGION_VALUE"
+      - name: Verify ECS completed rollout and desired running count
+        run: |
+          PRIMARY_STATE=$(aws ecs describe-services --cluster "$ROLLBACK_CLUSTER" --services "$ROLLBACK_SERVICE" --region "$AWS_REGION_VALUE" --query "services[0].deployments[?status=='PRIMARY'].rolloutState | [0]" --output text)
+          DESIRED_COUNT=$(aws ecs describe-services --cluster "$ROLLBACK_CLUSTER" --services "$ROLLBACK_SERVICE" --region "$AWS_REGION_VALUE" --query 'services[0].desiredCount' --output text)
+          RUNNING_COUNT=$(aws ecs describe-services --cluster "$ROLLBACK_CLUSTER" --services "$ROLLBACK_SERVICE" --region "$AWS_REGION_VALUE" --query 'services[0].runningCount' --output text)
+          test "$PRIMARY_STATE" = "COMPLETED"
+          test "$RUNNING_COUNT" = "$DESIRED_COUNT"
+      - name: Smoke ALB health after rollback
+        run: |
+          test -n "$HEALTH_URL"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            echo "Rollback ALB health smoke attempt $attempt for $HEALTH_URL"
+            if curl -fsS "$HEALTH_URL"; then
+              echo "ALB health smoke passed after rollback"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Rollback health smoke failed for cluster=$ROLLBACK_CLUSTER service=$ROLLBACK_SERVICE" >&2
+          exit 1

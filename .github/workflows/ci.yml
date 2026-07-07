@@ -13,8 +13,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: '22'
+  TERRAFORM_VERSION: '1.8.5'
+
 jobs:
-  contracts:
+  build:
+    name: CI / Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -23,13 +28,109 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build deployable app
+        run: npm run build
+
+  unit_contracts:
+    name: CI / Unit Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - name: Install dependencies
         run: npm ci
       - name: Run unit contracts
         run: npm run test:unit
+
+  verification_contracts:
+    name: CI / Verification Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
       - name: Run verification contracts
         run: npm run verify
+
+  integration_contracts:
+    name: CI / Integration Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run integration contracts
+        run: npm run test:integration
+
+  aws_static_validation:
+    name: CI / AWS Static Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - name: Check Terraform formatting
+        run: terraform -chdir=infra/aws fmt -check
+      - name: Initialize Terraform without backend
+        run: terraform -chdir=infra/aws init -backend=false
+      - name: Validate Terraform configuration
+        run: terraform -chdir=infra/aws validate
       - name: Run AWS static contracts
         run: npm run test:aws
+
+  aws_container_build_smoke:
+    name: CI / AWS Container Build Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build AWS app image without push
+        run: docker build -f Dockerfile.aws --label org.opencontainers.image.revision=${{ github.sha }} -t doculens-ai:ci-smoke .
+      - name: Verify minimal runtime packaging
+        run: |
+          docker run --rm --entrypoint node doculens-ai:ci-smoke --input-type=module -e '
+            import { existsSync } from "node:fs";
+            for (const file of ["/app/dist/index.html", "/app/apps/api/src/server/index.mjs", "/app/package.json"]) {
+              if (!existsSync(file)) throw new Error(`${file} missing from AWS runtime image`);
+            }
+          '
