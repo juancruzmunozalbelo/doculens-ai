@@ -14,6 +14,7 @@
     "test:integration": "node scripts/checks/integration-contract.mjs",
     "test:e2e": "playwright test --reporter=list",
     "test:docker": "node --test tests/docker/docker-contract.test.mjs",
+    "test:aws": "node --test tests/aws/terraform-validation.test.mjs",
     "smoke:markitdown": "node scripts/checks/markitdown-contract.mjs",
     "eval": "node scripts/checks/eval-contract.mjs",
     "test:eval": "node --test tests/eval/*.test.mjs",

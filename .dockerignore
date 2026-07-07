@@ -19,6 +19,8 @@ playwright-report
 *.crt
 *.enc
 .terraform
+**/.terraform
+**/.terraform/**
 *.tfstate
 *.tfstate.*
 *.tfplan

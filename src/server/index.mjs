@@ -1,4 +1,6 @@
 import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { loadServerConfigSync } from './config/env.mjs';
 import { createAuthService } from './auth/service.mjs';
 import {
@@ -24,6 +26,27 @@ const DEFAULT_SERVER_MINIMAX_BUDGET = Object.freeze({
   concurrencyLimit: 2,
   maxEstimatedCostUsd: 1,
 });
+
+const STATIC_MIME_TYPES = Object.freeze({
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+});
+
+function sendBuffer(response, statusCode, body, contentType) {
+  response.writeHead(statusCode, {
+    'content-type': contentType,
+    'content-length': body.length,
+  });
+  response.end(body);
+}
+
+function staticContentType(filePath) {
+  return STATIC_MIME_TYPES[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+}
 
 function sendJson(response, statusCode, payload) {
   const body = JSON.stringify(payload);
@@ -99,6 +122,46 @@ async function readJsonBody(request, { maxBytes = MAX_JSON_BODY_BYTES } = {}) {
 
 function routePath(request) {
   return new URL(request.url, 'http://127.0.0.1').pathname;
+}
+
+function staticFilePath(staticDir, pathname) {
+  if (!staticDir || pathname.startsWith('/api/')) {
+    return null;
+  }
+  const requestedPath = pathname === '/' ? '/index.html' : pathname;
+  const decodedPath = decodeURIComponent(requestedPath);
+  const normalizedPath = path.normalize(decodedPath).replace(/^(\.\.(\/|\\|$))+/, '');
+  const candidate = path.resolve(staticDir, `.${normalizedPath}`);
+  const root = path.resolve(staticDir);
+  if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
+    return null;
+  }
+  return candidate;
+}
+
+async function trySendStaticAsset({ response, staticDir, pathname }) {
+  const candidate = staticFilePath(staticDir, pathname);
+  if (!candidate) {
+    return false;
+  }
+  try {
+    const body = await readFile(candidate);
+    sendBuffer(response, 200, body, staticContentType(candidate));
+    return true;
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'EISDIR') {
+      throw error;
+    }
+  }
+  if (pathname !== '/' && !path.extname(pathname)) {
+    const indexPath = staticFilePath(staticDir, '/index.html');
+    if (indexPath) {
+      const body = await readFile(indexPath);
+      sendBuffer(response, 200, body, 'text/html; charset=utf-8');
+      return true;
+    }
+  }
+  return false;
 }
 
 async function requireCurrentUser(request, auth) {
@@ -425,6 +488,10 @@ export function createDocuLensServer(config, overrides = {}) {
         return;
       }
 
+      if (method === 'GET' && await trySendStaticAsset({ response, staticDir: config.staticDir, pathname })) {
+        return;
+      }
+
       sendJson(response, 404, { error: 'Not found' });
     } catch (error) {
       const statusCode = error instanceof DocumentAccessError ? error.statusCode : Number(error.statusCode) || 500;
@@ -435,9 +502,10 @@ export function createDocuLensServer(config, overrides = {}) {
 
 export function startServer(env = process.env) {
   const config = loadServerConfigSync(env);
+  const staticDir = env.DOCULENS_STATIC_DIR || null;
   const port = Number(env.PORT || 3000);
   const host = env.HOST || '127.0.0.1';
-  const server = createDocuLensServer(config);
+  const server = createDocuLensServer({ ...config, staticDir });
   server.listen(port, host, () => {
     console.log(redactSecrets(`DocuLens AI server listening on http://${host}:${port}`, [config.databaseUrl, config.jwtSecret, config.minimax.apiKey]));
   });
