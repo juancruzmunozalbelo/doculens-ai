@@ -160,6 +160,24 @@ function validCitations(providerCitations, retrievedChunks, secrets) {
     }));
 }
 
+function fallbackCitationFromRetrievedChunk(retrievedChunks, secrets) {
+  const chunk = retrievedChunks[0];
+  const chunkId = chunk?.chunkId ?? chunk?.id;
+  if (typeof chunkId !== 'string' || chunkId.trim() === '') {
+    return [];
+  }
+  const quoteSource = typeof chunk.contentExcerpt === 'string' && chunk.contentExcerpt.trim() !== ''
+    ? chunk.contentExcerpt
+    : typeof chunk.content === 'string'
+      ? chunk.content
+      : '';
+  return [{
+    chunkId,
+    quote: redactSecrets(quoteSource.slice(0, 240), secrets),
+    citationIndex: 0,
+  }];
+}
+
 function unsupportedAnswer({ metadata, strategy, secrets }) {
   return {
     text: 'This question is not supported by the document.',
@@ -316,9 +334,12 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
       },
     };
     const providerResult = await aiProvider.answerQuestion(providerPayload);
-    const acceptedCitations = strategy.contextStrategy === 'rag'
+    const validProviderCitations = strategy.contextStrategy === 'rag'
       ? validCitations(providerResult.citations, retrievedChunks, secrets)
       : [];
+    const acceptedCitations = strategy.contextStrategy === 'rag' && validProviderCitations.length === 0
+      ? fallbackCitationFromRetrievedChunk(retrievedChunks, secrets)
+      : validProviderCitations;
     const answer = normalizeProviderAnswer(providerResult, {
       metadata: retrievalMetadata,
       strategy,
