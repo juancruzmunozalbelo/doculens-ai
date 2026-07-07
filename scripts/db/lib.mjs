@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { redactSecrets } from '../../src/server/security/redact.mjs';
+import { redactSecrets } from '../../apps/api/src/server/security/redact.mjs';
 
 export const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
 

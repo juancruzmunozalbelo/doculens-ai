@@ -1,5 +1,5 @@
-import { createMiniMaxProvider, MINIMAX_DEFAULTS } from '../../src/server/ai/minimax-provider.mjs';
-import { redactSecrets } from '../../src/server/security/redact.mjs';
+import { createMiniMaxProvider, MINIMAX_DEFAULTS } from '../../apps/api/src/server/ai/minimax-provider.mjs';
+import { redactSecrets } from '../../apps/api/src/server/security/redact.mjs';
 
 function isLiveOptIn(env) {
   return env.DOCULENS_LIVE_MINIMAX === 'true' || env.DOCULENS_LIVE_MINIMAX === '1';

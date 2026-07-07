@@ -134,7 +134,7 @@ test('.env.example documents only placeholders for PostgreSQL, MiniMax, and JWT 
 
 test('runtime configuration rejects weak or default JWT_SECRET outside explicit test mode', async () => {
   const loadServerConfig = await importRequired(
-    'src/server/config/env.mjs',
+    'apps/api/src/server/config/env.mjs',
     ['loadServerConfig', 'loadConfig'],
     'server environment loader',
   );
@@ -160,7 +160,7 @@ test('runtime configuration rejects weak or default JWT_SECRET outside explicit 
 
 test('central redaction utility removes configured secret, document, and prompt canaries from logs', async () => {
   const redactSecrets = await importRequired(
-    'src/server/security/redact.mjs',
+    'apps/api/src/server/security/redact.mjs',
     ['redactSecrets', 'redactSensitive'],
     'central redaction utility',
   );

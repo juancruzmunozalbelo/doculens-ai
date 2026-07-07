@@ -5,8 +5,8 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chunkDocument } from '../../src/server/ingestion/chunking.mjs';
-import { normalizeDocumentText } from '../../src/server/ingestion/normalization.mjs';
+import { chunkDocument } from '../../apps/api/src/server/ingestion/chunking.mjs';
+import { normalizeDocumentText } from '../../apps/api/src/server/ingestion/normalization.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const samplePdfPath = path.join(repoRoot, 'samples/markitdown/doculens-sample.pdf');

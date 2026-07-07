@@ -253,7 +253,7 @@ function deniedDocumentAccess(message = 'Document not found', statusCode = 404) 
 }
 
 test('production DATABASE_URL server construction selects PostgreSQL repositories without repository overrides', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const config = productionConfig();
   const repositorySelections = [];
 
@@ -283,7 +283,7 @@ test('production DATABASE_URL server construction selects PostgreSQL repositorie
 
 test('PostgreSQL query helper keeps DATABASE_URL credentials and query payloads out of spawned psql argv', async (t) => {
   const createPostgreSqlRepositories = await importRequired(
-    'src/server/postgresql/repositories.mjs',
+    'apps/api/src/server/postgresql/repositories.mjs',
     ['createPostgreSqlRepositories'],
     'PostgreSQL repository factory',
   );
@@ -349,7 +349,7 @@ test('PostgreSQL query helper keeps DATABASE_URL credentials and query payloads 
 });
 
 test('unauthenticated auth routes reject oversized JSON bodies with 413 before reading body bytes', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const server = createDocuLensServer(testConfig());
   const baseUrl = await listen(server);
   try {
@@ -365,7 +365,7 @@ test('unauthenticated auth routes reject oversized JSON bodies with 413 before r
 });
 
 test('configured DATABASE_URL default server constructs auth and document repositories through the database wiring factory', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const config = testConfig();
   const constructed = [];
   const users = createMutableUserRepository();
@@ -443,7 +443,7 @@ test('configured DATABASE_URL default server constructs auth and document reposi
 });
 
 test('bearer JWT whose subject no longer exists is rejected before protected document handlers run', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const users = createMutableUserRepository();
   let documentCreateCalls = 0;
   const documentsRepository = {
@@ -485,7 +485,7 @@ test('bearer JWT whose subject no longer exists is rejected before protected doc
 });
 
 test('auth HTTP validation and credential failures map to 400/401/409 responses instead of 500', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const server = createDocuLensServer(testConfig());
   const baseUrl = await listen(server);
   try {
@@ -529,7 +529,7 @@ test('auth HTTP validation and credential failures map to 400/401/409 responses 
 });
 
 test('child-resource routes without child handlers still fail closed through parent document authorization', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const authorizationAttempts = [];
   const server = createDocuLensServer(testConfig(), {
     auth: {
@@ -582,7 +582,7 @@ test('child-resource routes without child handlers still fail closed through par
 
 test('registration stores a password hash, login returns an expiring JWT, and invalid credentials fail closed', async () => {
   const createAuthService = await importRequired(
-    'src/server/auth/service.mjs',
+    'apps/api/src/server/auth/service.mjs',
     ['createAuthService', 'createAuthenticationService'],
     'authentication service',
   );
@@ -649,7 +649,7 @@ test('registration stores a password hash, login returns an expiring JWT, and in
 });
 
 test('authenticated document routes reject missing tokens and pass current-user context to handlers', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const seenCurrentUsers = [];
   const server = createDocuLensServer(testConfig(), {
     auth: {
@@ -690,7 +690,7 @@ test('authenticated document routes reject missing tokens and pass current-user 
 });
 
 test('document create, list, read, and delete endpoints are scoped to the authenticated owner', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const server = createDocuLensServer(testConfig());
   const baseUrl = await listen(server);
   try {
@@ -761,7 +761,7 @@ test('document create, list, read, and delete endpoints are scoped to the authen
 
 test('document service uses owner-scoped resource-id queries and authorizes child resources through the parent document', async () => {
   const createDocumentService = await importRequired(
-    'src/server/documents/service.mjs',
+    'apps/api/src/server/documents/service.mjs',
     ['createDocumentService', 'createOwnedDocumentService'],
     'owner-scoped document service',
   );
@@ -859,7 +859,7 @@ test('document service uses owner-scoped resource-id queries and authorizes chil
 });
 
 test('child-resource HTTP routes deny cross-user analysis, message, chunk, citation, and cascade access without leaking document content', async () => {
-  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const createDocuLensServer = await importRequired('apps/api/src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
   const server = createDocuLensServer(testConfig());
   const baseUrl = await listen(server);
   try {
@@ -901,7 +901,7 @@ test('child-resource HTTP routes deny cross-user analysis, message, chunk, citat
 
 test('demo seed data includes both auth users, an owned NDA document, and an adversarial prompt-injection section', async () => {
   const loadDemoSeedData = await importRequired(
-    'src/server/demo/seed-data.mjs',
+    'apps/api/src/server/demo/seed-data.mjs',
     ['loadDemoSeedData', 'buildDemoSeedData'],
     'demo seed data contract',
   );

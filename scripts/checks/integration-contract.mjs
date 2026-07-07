@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { loadServerConfig } from '../../src/server/config/env.mjs';
+import { loadServerConfig } from '../../apps/api/src/server/config/env.mjs';
 
 const migrations = (await readdir(new URL('../../db/migrations/', import.meta.url))).filter((name) => name.endsWith('.sql'));
 if (migrations.length === 0) {

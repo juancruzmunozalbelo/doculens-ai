@@ -203,7 +203,7 @@ async function requestJson(baseUrl, pathname, { method = 'GET', token = 'owner-t
 
 async function createServerHarness(t, overrides = {}) {
   const { createDocuLensServer } = await importRequired(
-    'src/server/index.mjs',
+    'apps/api/src/server/index.mjs',
     ['createDocuLensServer'],
     'DocuLens HTTP server',
   );

@@ -5,8 +5,8 @@
   "type": "module",
   "description": "DocuLens AI foundation scaffold for the assessment implementation.",
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "build": "vite build",
+    "dev": "node scripts/dev.mjs --workspace apps/api --workspace apps/web",
+    "build": "npm run build --workspace apps/web && npm run build --workspace apps/api",
     "db:migrate": "node scripts/db/migrate.mjs",
     "db:reset": "node scripts/db/reset.mjs",
     "db:seed": "node scripts/db/seed.mjs",
@@ -21,18 +21,29 @@
     "test:eval": "node --test tests/eval/*.test.mjs",
     "smoke:minimax": "node scripts/checks/minimax-live-smoke.mjs",
     "verify": "node --test scripts/guardrails/check-tdd.test.mjs && node --test tests/foundation/foundation-contract.test.mjs",
-    "guard:tdd": "node scripts/guardrails/check-tdd.mjs --staged"
+    "guard:tdd": "node scripts/guardrails/check-tdd.mjs --staged",
+    "aws:check-context": "node scripts/checks/aws-context-guard.mjs --profile ${AWS_PROFILE:-doculens-demo} --region ${AWS_REGION:-us-east-1}",
+    "mutation:unit": "node scripts/checks/mutation-runner.mjs --mode=unit --scope=apps/api/src/server/security,apps/api/src/server/ingestion,apps/api/src/server/retrieval --command=\"npm run test:unit\"",
+    "mutation:integration": "node scripts/checks/mutation-runner.mjs --mode=integration --scope=apps/api/src/server --command=\"npm run test:integration\"",
+    "mutation:e2e": "node scripts/checks/mutation-runner.mjs --mode=e2e --scope=apps/web/src --command=\"npm run test:e2e\"",
+    "mutation:smoke": "node scripts/checks/mutation-runner.mjs --mode=smoke --scope=apps/api/src/server/security --command=\"npm run test:unit\"",
+    "mutation:full": "MUTATION_MODE=manual node scripts/checks/mutation-runner.mjs --mode=manual --scope=apps/api/src/server,apps/web/src --command=\"npm run test:unit && npm run test:integration && npm run test:e2e\""
   },
   "engines": {
     "node": ">=22"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
-    "@playwright/test": "latest"
-  }
+    "@playwright/test": "latest",
+    "@stryker-mutator/core": "^9.6.1"
+  },
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ]
 }

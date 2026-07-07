@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { buildDemoSeedData } from '../../src/server/demo/seed-data.mjs';
-import { createRetrievalProvider } from '../../src/server/retrieval/provider.mjs';
-import { createDocumentAiService } from '../../src/server/chat/service.mjs';
-import { createMiniMaxProvider } from '../../src/server/ai/minimax-provider.mjs';
-import { PROMPT_VERSION } from '../../src/server/ai/prompts/registry.mjs';
-import { redactSecrets } from '../../src/server/security/redact.mjs';
+import { buildDemoSeedData } from '../../apps/api/src/server/demo/seed-data.mjs';
+import { createRetrievalProvider } from '../../apps/api/src/server/retrieval/provider.mjs';
+import { createDocumentAiService } from '../../apps/api/src/server/chat/service.mjs';
+import { createMiniMaxProvider } from '../../apps/api/src/server/ai/minimax-provider.mjs';
+import { PROMPT_VERSION } from '../../apps/api/src/server/ai/prompts/registry.mjs';
+import { redactSecrets } from '../../apps/api/src/server/security/redact.mjs';
 
 const failures = [];
 const skips = [];
