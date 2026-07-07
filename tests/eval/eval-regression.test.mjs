@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -7,7 +8,7 @@ import { redactSecrets } from '../../apps/api/src/server/security/redact.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-function runNodeScript(script, envOverrides = {}) {
+function evalScriptEnv(envOverrides = {}) {
   const env = {
     ...process.env,
     AI_PROVIDER: 'minimax',
@@ -22,6 +23,11 @@ function runNodeScript(script, envOverrides = {}) {
     PROVIDER_RESPONSE_CANARY: 'PROVIDER_RESPONSE_CANARY:EVAL_PROVIDER_RESPONSE_MUST_NOT_LEAK',
     ...envOverrides,
   };
+  return env;
+}
+
+function runNodeScript(script, envOverrides = {}) {
+  const env = evalScriptEnv(envOverrides);
   return spawnSync(process.execPath, [script], {
     cwd: repoRoot,
     env,
@@ -30,11 +36,36 @@ function runNodeScript(script, envOverrides = {}) {
   });
 }
 
+function runNodeScriptAsync(script, envOverrides = {}) {
+  const env = evalScriptEnv(envOverrides);
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [script], {
+      cwd: repoRoot,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (status, signal) => {
+      resolve({ status, signal, stdout, stderr });
+    });
+  });
+}
+
 function combinedOutput(result) {
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
-function sanitizedOutput(result) {
+function sanitizedOutput(result, extraSecrets = {}) {
   return redactSecrets(combinedOutput(result), {
     minimaxApiKey: 'MINIMAX_EVAL_REDACTION_CANARY',
     jwtSecret: 'JWT_EVAL_REDACTION_CANARY_WITH_ENTROPY',
@@ -44,6 +75,7 @@ function sanitizedOutput(result) {
     rawDocumentText: 'RAW_DOCUMENT_CANARY:EVAL_DOCUMENT_TEXT_MUST_NOT_LEAK',
     fullPrompt: 'FULL_PROMPT_CANARY:EVAL_FULL_PROMPT_MUST_NOT_LEAK',
     providerResponse: 'PROVIDER_RESPONSE_CANARY:EVAL_PROVIDER_RESPONSE_MUST_NOT_LEAK',
+    ...extraSecrets,
   });
 }
 
@@ -126,6 +158,81 @@ test('npm run eval produces reviewer-readable pass/skip/fail evidence for PR8 ev
       pattern: /^(PASS|SKIP|FAIL)\s+7\.16\b.*PostgreSQL.*foreign key.*unique chunk.*same-document.*rollback.*idempoten/im,
     },
   ]);
+});
+
+test('live MiniMax eval gate reaches provider transport before budget rejection', async (t) => {
+  const liveApiKey = 'sk-minimax_live_eval_budget_1234567890';
+  const providerRequests = [];
+  const server = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk) => {
+      body += chunk;
+    });
+    request.on('end', () => {
+      providerRequests.push({
+        method: request.method,
+        url: request.url,
+        body: JSON.parse(body),
+      });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({
+        id: 'loopback-live-eval-response',
+        model: 'MiniMax-M3',
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: 'Loopback MiniMax eval response reached transport after budget validation.',
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 },
+      }));
+    });
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve();
+    });
+  });
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+  }));
+
+  const address = server.address();
+  assert.equal(typeof address, 'object', 'loopback MiniMax server must bind to a local TCP port');
+  const result = await runNodeScriptAsync('scripts/checks/eval-contract.mjs', {
+    DOCULENS_EVAL_REQUIRE_LIVE_MINIMAX: 'true',
+    MINIMAX_API_KEY: liveApiKey,
+    MINIMAX_BASE_URL: `http://127.0.0.1:${address.port}/v1`,
+  });
+  const output = sanitizedOutput(result, { minimaxApiKey: liveApiKey });
+
+  assert.equal(
+    result.status,
+    0,
+    `live MiniMax eval gate must complete against loopback transport without rejecting its own max output token request as over-budget; output:\n${output}`,
+  );
+  assert.equal(providerRequests.length, 1, 'live MiniMax eval gate must perform exactly one loopback provider request');
+  assert.deepEqual(
+    {
+      method: providerRequests[0].method,
+      url: providerRequests[0].url,
+      model: providerRequests[0].body.model,
+      maxTokens: providerRequests[0].body.max_tokens,
+    },
+    {
+      method: 'POST',
+      url: '/v1/chat/completions',
+      model: 'MiniMax-M3',
+      maxTokens: 400,
+    },
+    'live MiniMax eval request must use the provider/model/output-token contract accepted by the budget gate',
+  );
 });
 
 test('eval output redacts injected secret, document, prompt, and provider-response canaries', () => {
