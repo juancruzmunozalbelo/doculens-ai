@@ -13,6 +13,7 @@ create table if not exists documents (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   title text not null,
+  content text not null default '',
   source_type text not null default 'markdown',
   status text not null default 'ready',
   content_sha256 text not null,
