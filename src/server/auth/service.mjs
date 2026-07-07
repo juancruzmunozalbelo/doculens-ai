@@ -6,6 +6,22 @@ const DEFAULT_TOKEN_TTL_SECONDS = 60 * 60;
 const SCRYPT_KEY_LENGTH = 64;
 const SCRYPT_OPTIONS = Object.freeze({ N: 16_384, r: 8, p: 1 });
 
+export class AuthServiceError extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.name = 'AuthServiceError';
+    this.statusCode = statusCode;
+  }
+}
+
+function invalidCredentials() {
+  return new AuthServiceError('Invalid credentials', 401);
+}
+
+function invalidAuthRequest(message) {
+  return new AuthServiceError(message, 400);
+}
+
 function base64urlJson(value) {
   return Buffer.from(JSON.stringify(value)).toString('base64url');
 }
@@ -21,7 +37,7 @@ function signJwt({ payload, jwtSecret }) {
 
 function verifyJwt({ token, jwtSecret, now }) {
   if (typeof token !== 'string' || token.split('.').length !== 3) {
-    throw new Error('Invalid credentials');
+    throw invalidCredentials();
   }
   const [encodedHeader, encodedPayload, signature] = token.split('.');
   const signingInput = `${encodedHeader}.${encodedPayload}`;
@@ -29,34 +45,34 @@ function verifyJwt({ token, jwtSecret, now }) {
   const expectedBytes = Buffer.from(expected);
   const signatureBytes = Buffer.from(signature);
   if (expectedBytes.length !== signatureBytes.length || !timingSafeEqual(expectedBytes, signatureBytes)) {
-    throw new Error('Invalid credentials');
+    throw invalidCredentials();
   }
 
   let payload;
   try {
     payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
   } catch {
-    throw new Error('Invalid credentials');
+    throw invalidCredentials();
   }
   if (!payload || typeof payload.sub !== 'string' || !Number.isInteger(payload.exp)) {
-    throw new Error('Invalid credentials');
+    throw invalidCredentials();
   }
   if (payload.exp * 1000 <= now().getTime()) {
-    throw new Error('Invalid credentials');
+    throw invalidCredentials();
   }
   return payload;
 }
 
 function normalizeEmail(email) {
   if (typeof email !== 'string' || email.trim() === '') {
-    throw new Error('Email is required');
+    throw invalidAuthRequest('Email is required');
   }
   return email.trim().toLowerCase();
 }
 
 function requirePassword(password) {
   if (typeof password !== 'string' || password.length < 8) {
-    throw new Error('Password must be at least 8 characters');
+    throw invalidAuthRequest('Password must be at least 8 characters');
   }
   return password;
 }
@@ -143,7 +159,7 @@ export function createAuthService({
     const user = await findByEmail(normalizedEmail);
     const credential = user?.passwordHash ?? user?.password_hash;
     if (!user || !(await verifyPassword(suppliedPassword, credential))) {
-      throw new Error('Invalid credentials');
+      throw invalidCredentials();
     }
     const issuedAt = Math.floor(now().getTime() / 1000);
     const exp = issuedAt + Number(tokenTtlSeconds);
@@ -164,7 +180,7 @@ export function createAuthService({
     try {
       const payload = verifyJwt({ token, jwtSecret, now });
       const user = await findById(payload.sub);
-      return user ? publicUser(user) : { id: payload.sub, email: payload.email };
+      return user ? publicUser(user) : null;
     } catch {
       return null;
     }

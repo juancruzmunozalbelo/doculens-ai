@@ -111,6 +111,263 @@ async function registerAndLogin(baseUrl, { email, password, displayName }) {
   return { user: registration.body.user, accessToken: login.body.accessToken };
 }
 
+function createMutableUserRepository() {
+  const usersById = new Map();
+  const usersByEmail = new Map();
+
+  return {
+    async createUser({ email, passwordHash, displayName }) {
+      const normalizedEmail = String(email).toLowerCase();
+      if (usersByEmail.has(normalizedEmail)) {
+        const error = new Error('User already exists');
+        error.statusCode = 409;
+        throw error;
+      }
+      const user = { id: `postgres-user-${usersById.size + 1}`, email: normalizedEmail, passwordHash, displayName };
+      usersById.set(user.id, user);
+      usersByEmail.set(user.email, user);
+      return { id: user.id, email: user.email, displayName: user.displayName };
+    },
+    async findByEmail(email) {
+      return usersByEmail.get(String(email).toLowerCase()) ?? null;
+    },
+    async findById(id) {
+      return usersById.get(id) ?? null;
+    },
+    deleteById(id) {
+      const user = usersById.get(id);
+      if (!user) {
+        return false;
+      }
+      usersById.delete(id);
+      usersByEmail.delete(user.email);
+      return true;
+    },
+  };
+}
+
+function deniedDocumentAccess(message = 'Document not found', statusCode = 404) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
+test('configured DATABASE_URL default server constructs auth and document repositories through the database wiring factory', async () => {
+  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const config = testConfig();
+  const constructed = [];
+  const users = createMutableUserRepository();
+  const createdDocuments = [];
+  const documentsRepository = {
+    async createForUser({ userId, title, content }) {
+      const document = { id: `postgres-document-${createdDocuments.length + 1}`, userId, title, content };
+      createdDocuments.push(document);
+      return document;
+    },
+    async listForUser({ userId }) {
+      return createdDocuments.filter((document) => document.userId === userId);
+    },
+    async findByIdForUser({ documentId, userId }) {
+      return createdDocuments.find((document) => document.id === documentId && document.userId === userId) ?? null;
+    },
+    async deleteByIdForUser({ documentId, userId }) {
+      const index = createdDocuments.findIndex((document) => document.id === documentId && document.userId === userId);
+      if (index === -1) {
+        return false;
+      }
+      createdDocuments.splice(index, 1);
+      return true;
+    },
+  };
+  const repositoryFactory = ({ databaseUrl }) => {
+    constructed.push(databaseUrl);
+    return { users, documentsRepository };
+  };
+  const server = createDocuLensServer(config, { repositoryFactory });
+  const baseUrl = await listen(server);
+  try {
+    const registration = await requestJson(baseUrl, '/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'database-wiring@example.test',
+        password: 'Database wiring password 2!',
+        displayName: 'Database Wiring',
+      },
+    });
+
+    assert.equal(registration.status, 201, 'registration through configured server must succeed');
+    const login = await requestJson(baseUrl, '/api/auth/login', {
+      method: 'POST',
+      body: {
+        email: 'database-wiring@example.test',
+        password: 'Database wiring password 2!',
+      },
+    });
+    assert.equal(login.status, 200, 'login through configured server must use the same database-wired user repository');
+    const createdDocument = await requestJson(baseUrl, '/api/documents', {
+      method: 'POST',
+      token: login.body?.accessToken,
+      body: { title: 'Database wired document', content: 'stored through the database repository factory' },
+    });
+    assert.equal(createdDocument.status, 201, 'document create through configured server must succeed');
+    assert.deepEqual(
+      constructed,
+      [config.databaseUrl],
+      'configured server must construct its default repositories from DATABASE_URL instead of empty process-local stores',
+    );
+    assert.equal(
+      registration.body?.user?.id,
+      'postgres-user-1',
+      'registration must be persisted through the user repository returned by the database wiring factory',
+    );
+    assert.equal(
+      createdDocument.body?.document?.id,
+      'postgres-document-1',
+      'document creation must be persisted through the document repository returned by the database wiring factory',
+    );
+  } finally {
+    await close(server);
+  }
+});
+
+test('bearer JWT whose subject no longer exists is rejected before protected document handlers run', async () => {
+  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const users = createMutableUserRepository();
+  let documentCreateCalls = 0;
+  const documentsRepository = {
+    async createForUser({ userId, title, content }) {
+      documentCreateCalls += 1;
+      return { id: 'should-not-create-for-deleted-user', userId, title, content };
+    },
+    async listForUser() {
+      return [];
+    },
+    async findByIdForUser() {
+      return null;
+    },
+    async deleteByIdForUser() {
+      return false;
+    },
+  };
+  const server = createDocuLensServer(testConfig(), { users, documentsRepository });
+  const baseUrl = await listen(server);
+  try {
+    const account = await registerAndLogin(baseUrl, {
+      email: 'deleted-token-subject@example.test',
+      password: 'Deleted token subject password 2!',
+      displayName: 'Deleted Token Subject',
+    });
+    assert.equal(users.deleteById(account.user.id), true, 'test setup must remove the token subject from the backing user repository');
+
+    const response = await requestJson(baseUrl, '/api/documents', {
+      method: 'POST',
+      token: account.accessToken,
+      body: { title: 'Deleted subject document', content: 'must not be created through JWT payload fallback' },
+    });
+
+    assert.equal(response.status, 401, 'protected routes must reject a validly signed JWT when the subject user no longer exists');
+    assert.equal(documentCreateCalls, 0, 'protected document handlers must not run for a deleted token subject');
+  } finally {
+    await close(server);
+  }
+});
+
+test('auth HTTP validation and credential failures map to 400/401/409 responses instead of 500', async () => {
+  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const server = createDocuLensServer(testConfig());
+  const baseUrl = await listen(server);
+  try {
+    const created = await requestJson(baseUrl, '/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'auth-status@example.test',
+        password: 'Auth status password 2!',
+        displayName: 'Auth Status',
+      },
+    });
+    assert.equal(created.status, 201, 'test setup must create the account used for auth status checks');
+
+    const cases = [
+      ['wrongPassword', '/api/auth/login', { email: 'auth-status@example.test', password: 'wrong-password' }],
+      ['missingRegisterEmail', '/api/auth/register', { password: 'Auth status password 2!', displayName: 'Missing Email' }],
+      ['shortRegisterPassword', '/api/auth/register', { email: 'short-password@example.test', password: 'short' }],
+      ['missingLoginPassword', '/api/auth/login', { email: 'auth-status@example.test' }],
+      ['duplicateRegistration', '/api/auth/register', { email: 'auth-status@example.test', password: 'Auth status password 2!' }],
+    ];
+    const actualStatuses = {};
+    for (const [name, pathname, body] of cases) {
+      const response = await requestJson(baseUrl, pathname, { method: 'POST', body });
+      actualStatuses[name] = response.status;
+    }
+
+    assert.deepEqual(
+      actualStatuses,
+      {
+        wrongPassword: 401,
+        missingRegisterEmail: 400,
+        shortRegisterPassword: 400,
+        missingLoginPassword: 400,
+        duplicateRegistration: 409,
+      },
+      'auth routes must surface client validation, credential, and conflict failures with non-500 status classes',
+    );
+  } finally {
+    await close(server);
+  }
+});
+
+test('child-resource routes without child handlers still fail closed through parent document authorization', async () => {
+  const createDocuLensServer = await importRequired('src/server/index.mjs', ['createDocuLensServer'], 'HTTP server factory');
+  const authorizationAttempts = [];
+  const server = createDocuLensServer(testConfig(), {
+    auth: {
+      async authenticateBearerToken(token) {
+        return token === 'bob-token' ? { id: 'user-bob', email: 'bob.child-missing@example.test' } : null;
+      },
+    },
+    documents: {
+      async authorizeDocumentChildResource({ currentUser, documentId, resourceType, action }) {
+        authorizationAttempts.push({ currentUser, documentId, resourceType, action });
+        throw deniedDocumentAccess('Document not found', 404);
+      },
+    },
+  });
+  const baseUrl = await listen(server);
+  try {
+    const deniedRequests = [
+      ['GET', '/api/documents/alice-private-doc/analysis', undefined, 'analysis read'],
+      ['GET', '/api/documents/alice-private-doc/messages', undefined, 'message read'],
+      ['POST', '/api/documents/alice-private-doc/messages', { question: 'summarize it' }, 'message create'],
+      ['GET', '/api/documents/alice-private-doc/chunks', undefined, 'chunk read'],
+      ['GET', '/api/documents/alice-private-doc/citations', undefined, 'citation read'],
+    ];
+    const statuses = {};
+    for (const [method, pathname, body, label] of deniedRequests) {
+      const response = await requestJson(baseUrl, pathname, { method, token: 'bob-token', body });
+      statuses[label] = response.status;
+    }
+
+    assert.deepEqual(
+      statuses,
+      {
+        'analysis read': 404,
+        'message read': 404,
+        'message create': 404,
+        'chunk read': 404,
+        'citation read': 404,
+      },
+      'missing child handlers must not return 200/201 placeholders when parent document authorization denies access',
+    );
+    assert.equal(
+      authorizationAttempts.length,
+      deniedRequests.length,
+      'each child-resource route must attempt parent document authorization before deciding the response',
+    );
+  } finally {
+    await close(server);
+  }
+});
+
 test('registration stores a password hash, login returns an expiring JWT, and invalid credentials fail closed', async () => {
   const createAuthService = await importRequired(
     'src/server/auth/service.mjs',

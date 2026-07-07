@@ -24,6 +24,9 @@ function sendNoContent(response) {
 }
 
 function safeErrorMessage(statusCode) {
+  if (statusCode === 400) {
+    return 'Bad request';
+  }
   if (statusCode === 401) {
     return 'Unauthorized';
   }
@@ -32,6 +35,9 @@ function safeErrorMessage(statusCode) {
   }
   if (statusCode === 404) {
     return 'Not found';
+  }
+  if (statusCode === 409) {
+    return 'Conflict';
   }
   return 'Request failed';
 }
@@ -66,15 +72,37 @@ async function requireCurrentUser(request, auth) {
   return auth.authenticateBearerToken(match[1]);
 }
 
+function repositoriesFromFactory(config, repositoryFactory) {
+  if (typeof repositoryFactory !== 'function') {
+    throw new Error('repositoryFactory must be a function');
+  }
+  if (typeof config?.databaseUrl !== 'string' || config.databaseUrl.trim() === '') {
+    throw new Error('DATABASE_URL is required for database repository wiring');
+  }
+  const repositories = repositoryFactory({ databaseUrl: config.databaseUrl, config });
+  if (!repositories || typeof repositories !== 'object') {
+    throw new Error('repositoryFactory must return repository bindings');
+  }
+  return repositories;
+}
+
+function defaultRepositories(config, overrides) {
+  if (overrides.repositoryFactory && !overrides.users && !overrides.documentsRepository && !overrides.auth && !overrides.documents) {
+    return repositoriesFromFactory(config, overrides.repositoryFactory);
+  }
+  return {};
+}
+
 function buildServices(config, overrides = {}) {
-  const users = overrides.users ?? createInMemoryUserRepository();
-  const documentsRepository = overrides.documentsRepository ?? createInMemoryDocumentRepository();
+  const repositories = defaultRepositories(config, overrides);
+  const users = overrides.users ?? repositories.users ?? createInMemoryUserRepository();
+  const documentsRepository = overrides.documentsRepository ?? repositories.documentsRepository ?? createInMemoryDocumentRepository();
   const auth = overrides.auth ?? createAuthService({
     users,
     jwtSecret: config.jwtSecret,
     tokenTtlSeconds: config.jwtTokenTtlSeconds ?? 60 * 60,
   });
-  const documents = overrides.documents ?? createDocumentService({ documents: documentsRepository });
+  const documents = overrides.documents ?? repositories.documents ?? createDocumentService({ documents: documentsRepository });
   return { auth, documents };
 }
 
@@ -91,6 +119,13 @@ function documentIdFromPath(pathname, suffix = '') {
   const pattern = new RegExp(`^/api/documents/([^/]+)${suffix}$`);
   const match = pathname.match(pattern);
   return match ? decodeURIComponent(match[1]) : null;
+}
+
+async function requireDocumentChildAuthorization(services, { currentUser, documentId, resourceType, action }) {
+  if (typeof services.documents?.authorizeDocumentChildResource !== 'function') {
+    throw new DocumentAccessError('Document not found', 404);
+  }
+  return services.documents.authorizeDocumentChildResource({ currentUser, documentId, resourceType, action });
 }
 
 export function createDocuLensServer(config, overrides = {}) {
@@ -161,9 +196,18 @@ export function createDocuLensServer(config, overrides = {}) {
       const analysisDocumentId = documentIdFromPath(pathname, '/analysis');
       if (analysisDocumentId && method === 'GET') {
         await handleProtected(request, response, services, async (currentUser) => {
-          const analysis = typeof services.documents.listAnalysis === 'function'
-            ? await services.documents.listAnalysis({ currentUser, documentId: analysisDocumentId })
-            : [];
+          let analysis;
+          if (typeof services.documents.listAnalysis === 'function') {
+            analysis = await services.documents.listAnalysis({ currentUser, documentId: analysisDocumentId });
+          } else {
+            await requireDocumentChildAuthorization(services, {
+              currentUser,
+              documentId: analysisDocumentId,
+              resourceType: 'analysis',
+              action: 'read',
+            });
+            analysis = [];
+          }
           sendJson(response, 200, { analysis });
         });
         return;
@@ -172,9 +216,18 @@ export function createDocuLensServer(config, overrides = {}) {
       const messagesDocumentId = documentIdFromPath(pathname, '/messages');
       if (messagesDocumentId && method === 'GET') {
         await handleProtected(request, response, services, async (currentUser) => {
-          const messages = typeof services.documents.listMessages === 'function'
-            ? await services.documents.listMessages({ currentUser, documentId: messagesDocumentId })
-            : [];
+          let messages;
+          if (typeof services.documents.listMessages === 'function') {
+            messages = await services.documents.listMessages({ currentUser, documentId: messagesDocumentId });
+          } else {
+            await requireDocumentChildAuthorization(services, {
+              currentUser,
+              documentId: messagesDocumentId,
+              resourceType: 'message',
+              action: 'read',
+            });
+            messages = [];
+          }
           sendJson(response, 200, { messages });
         });
         return;
@@ -183,9 +236,18 @@ export function createDocuLensServer(config, overrides = {}) {
       if (messagesDocumentId && method === 'POST') {
         await handleProtected(request, response, services, async (currentUser) => {
           const body = await readJsonBody(request);
-          const message = typeof services.documents.createMessage === 'function'
-            ? await services.documents.createMessage({ currentUser, documentId: messagesDocumentId, question: body.question })
-            : null;
+          let message;
+          if (typeof services.documents.createMessage === 'function') {
+            message = await services.documents.createMessage({ currentUser, documentId: messagesDocumentId, question: body.question });
+          } else {
+            await requireDocumentChildAuthorization(services, {
+              currentUser,
+              documentId: messagesDocumentId,
+              resourceType: 'message',
+              action: 'create',
+            });
+            message = null;
+          }
           sendJson(response, 201, { message });
         });
         return;
@@ -194,9 +256,18 @@ export function createDocuLensServer(config, overrides = {}) {
       const chunksDocumentId = documentIdFromPath(pathname, '/chunks');
       if (chunksDocumentId && method === 'GET') {
         await handleProtected(request, response, services, async (currentUser) => {
-          const chunks = typeof services.documents.listChunks === 'function'
-            ? await services.documents.listChunks({ currentUser, documentId: chunksDocumentId })
-            : [];
+          let chunks;
+          if (typeof services.documents.listChunks === 'function') {
+            chunks = await services.documents.listChunks({ currentUser, documentId: chunksDocumentId });
+          } else {
+            await requireDocumentChildAuthorization(services, {
+              currentUser,
+              documentId: chunksDocumentId,
+              resourceType: 'chunk',
+              action: 'read',
+            });
+            chunks = [];
+          }
           sendJson(response, 200, { chunks });
         });
         return;
@@ -205,9 +276,18 @@ export function createDocuLensServer(config, overrides = {}) {
       const citationsDocumentId = documentIdFromPath(pathname, '/citations');
       if (citationsDocumentId && method === 'GET') {
         await handleProtected(request, response, services, async (currentUser) => {
-          const citations = typeof services.documents.listCitations === 'function'
-            ? await services.documents.listCitations({ currentUser, documentId: citationsDocumentId })
-            : [];
+          let citations;
+          if (typeof services.documents.listCitations === 'function') {
+            citations = await services.documents.listCitations({ currentUser, documentId: citationsDocumentId });
+          } else {
+            await requireDocumentChildAuthorization(services, {
+              currentUser,
+              documentId: citationsDocumentId,
+              resourceType: 'citation',
+              action: 'read',
+            });
+            citations = [];
+          }
           sendJson(response, 200, { citations });
         });
         return;
