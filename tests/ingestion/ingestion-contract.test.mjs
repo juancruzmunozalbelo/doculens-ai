@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const assessmentFixtureText = readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/full-stack-ai-engineer-assessment.txt'), 'utf8');
+const assessmentManifest = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/manifest.json'), 'utf8'));
 const owner = Object.freeze({ id: '11111111-1111-4111-8111-111111111111', email: 'owner@example.com' });
 const intruder = Object.freeze({ id: '22222222-2222-4222-8222-222222222222', email: 'intruder@example.com' });
 
@@ -188,6 +192,46 @@ Either party may terminate after uncured material breach.`);
     first.every((chunk) => Number.isInteger(chunk.tokenEstimate) && chunk.tokenEstimate > 0 && chunk.tokenEstimate <= 18),
     'each emitted chunk must carry a positive bounded token estimate',
   );
+});
+
+test('assessment extracted-text fixture normalizes and chunks into the committed golden-path structure', async () => {
+  const { normalizeDocumentText } = await importRequired(
+    'apps/api/src/server/ingestion/normalization.mjs',
+    ['normalizeDocumentText'],
+    'Markdown/text normalization for assessment fixture',
+  );
+  const { chunkDocument } = await importRequired(
+    'apps/api/src/server/ingestion/chunking.mjs',
+    ['chunkDocument'],
+    'Section-aware chunking for assessment fixture',
+  );
+
+  const expectedTextSha = assessmentManifest.files.extractedText.sha256;
+  const actualTextSha = createHash('sha256').update(assessmentFixtureText).digest('hex');
+  assert.equal(actualTextSha, expectedTextSha, 'extracted assessment fixture text must match the manifest checksum used by provider/retrieval tests');
+
+  const normalized = normalizeDocumentText(assessmentFixtureText);
+  const chunks = chunkDocument({ documentId: 'doc-full-stack-ai-assessment-fixture', content: normalized });
+  assert.ok(chunks.length >= assessmentManifest.chunkingExpectations.minimumChunkCount, 'assessment fixture must produce enough retrievable chunks for golden questions');
+  assert.ok(
+    chunks.reduce((sum, chunk) => sum + chunk.tokenEstimate, 0) >= assessmentManifest.chunkingExpectations.minimumTokenEstimate,
+    'assessment fixture chunks must retain the expected amount of reviewer-visible content',
+  );
+
+  const headingPaths = chunks.map((chunk) => chunk.headingPath);
+  for (const expectedHeading of assessmentManifest.chunkingExpectations.expectedHeadingPaths) {
+    assert.ok(
+      headingPaths.some((actualHeading) => JSON.stringify(actualHeading) === JSON.stringify(expectedHeading)),
+      `assessment fixture chunks must include heading path ${expectedHeading.join(' > ')}`,
+    );
+  }
+  for (const snippet of assessmentManifest.pageTextSnippets) {
+    assert.match(
+      chunks.map((chunk) => `${chunk.headingPath.join(' ')}\n${chunk.content ?? chunk.contentExcerpt ?? ''}`).join('\n'),
+      new RegExp(snippet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+      `assessment fixture chunks must expose snippet: ${snippet}`,
+    );
+  }
 });
 
 test('document create pipeline normalizes content, persists chunks, and lists only owner-authorized chunk metadata', async () => {

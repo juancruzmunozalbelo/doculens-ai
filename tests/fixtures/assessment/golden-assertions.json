@@ -1,0 +1,403 @@
+{
+  "analysis": {
+    "deliverables": {
+      "mustMention": [
+        "Git repository",
+        "runnable local setup instructions",
+        "README",
+        "architecture",
+        "AI design",
+        "data flow",
+        "privacy decisions",
+        "reliability strategy",
+        "deployment approach",
+        "trade-offs"
+      ]
+    },
+    "recommendedQuestions": [
+      "What is this document about?",
+      "What backend requirements does the assessment specify?",
+      "What frontend UX requirements should be implemented?",
+      "What data, privacy, and logging expectations are stated?",
+      "What reliability and evaluation evidence is expected?",
+      "What deployment requirements are included?",
+      "What deliverables must the candidate provide?"
+    ],
+    "requirements": {
+      "mustMention": [
+        "REST API",
+        "LLM provider",
+        "provider abstraction",
+        "persistence",
+        "JWT authentication",
+        "ownership checks",
+        "React",
+        "loading states",
+        "error states",
+        "empty states",
+        "retrieval-grounded chat",
+        "data retention",
+        "PII",
+        "logging",
+        "evaluation",
+        "reliability",
+        "AWS infrastructure",
+        "Terraform or CloudFormation",
+        "secure secret handling",
+        "README"
+      ]
+    },
+    "risks": {
+      "mustMentionSupportedOrDerived": [
+        "unsupported facts",
+        "raw model payloads",
+        "privacy",
+        "run by the reviewer"
+      ],
+      "mustNotStateAsSourceFact": [
+        "prompt injection risk",
+        "token cost risk",
+        "multi-region deployment risk"
+      ]
+    },
+    "sections": {
+      "expectedTitles": [
+        "Overview and objective",
+        "Backend requirements",
+        "AI and retrieval requirements",
+        "Frontend requirements",
+        "Data, privacy, and logging requirements",
+        "Reliability and evaluation requirements",
+        "Deployment and operations requirements",
+        "Deliverables"
+      ]
+    },
+    "summary": {
+      "mustMention": [
+        "Full Stack AI Engineer Assessment",
+        "AI-powered full-stack application",
+        "data flow",
+        "privacy",
+        "reliability",
+        "AWS",
+        "deployment",
+        "deliverables"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ]
+    }
+  },
+  "chatGoldenQuestions": {
+    "backend": {
+      "evidenceSnippets": [
+        "The backend must expose a REST API",
+        "JWT authentication is expected for protected routes"
+      ],
+      "expectedDisplayStateKinds": [
+        "grounded"
+      ],
+      "mustMention": [
+        "REST API",
+        "authentication",
+        "document creation",
+        "analysis",
+        "chat",
+        "source retrieval",
+        "LLM provider",
+        "provider abstraction",
+        "persistence",
+        "JWT",
+        "ownership checks"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What backend requirements does the assessment specify?"
+    },
+    "dataPrivacy": {
+      "evidenceSnippets": [
+        "The application must describe what document data is stored",
+        "Logs must avoid raw document text"
+      ],
+      "expectedDisplayStateKinds": [
+        "grounded"
+      ],
+      "mustMention": [
+        "stored",
+        "third-party AI provider",
+        "retained",
+        "logs",
+        "raw document text",
+        "provider payloads",
+        "stack traces",
+        "secret-shaped values",
+        "safe original basename",
+        "MIME type",
+        "upload time",
+        "source control"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What data, privacy, and logging expectations are stated?"
+    },
+    "deliverables": {
+      "evidenceSnippets": [
+        "The candidate must deliver a Git repository",
+        "The README should include how to run the app"
+      ],
+      "expectedDisplayStateKinds": [
+        "grounded"
+      ],
+      "mustMention": [
+        "Git repository",
+        "runnable local setup instructions",
+        "README",
+        "architecture",
+        "AI design",
+        "data flow",
+        "privacy decisions",
+        "reliability strategy",
+        "deployment approach",
+        "trade-offs",
+        "targeted tests",
+        "configure the AI provider safely"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What deliverables must the candidate provide?"
+    },
+    "deployment": {
+      "evidenceSnippets": [
+        "AWS infrastructure described or provisioned using Terraform or CloudFormation",
+        "The demo infrastructure can be small and disposable"
+      ],
+      "expectedDisplayStateKinds": [
+        "grounded"
+      ],
+      "mustMention": [
+        "AWS",
+        "Terraform",
+        "CloudFormation",
+        "configuration from code",
+        "managed secret stores",
+        "scaling considerations",
+        "API",
+        "database",
+        "PDF processing",
+        "AI provider latency",
+        "teardown"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What deployment requirements are included?"
+    },
+    "frontend": {
+      "evidenceSnippets": [
+        "The frontend must be implemented in React",
+        "AI responses must be formatted as readable prose and structured sections"
+      ],
+      "expectedDisplayStateKinds": [
+        "grounded"
+      ],
+      "mustMention": [
+        "React",
+        "source intake",
+        "review briefing",
+        "starter questions",
+        "chat input",
+        "answer cards",
+        "inspectable evidence",
+        "loading states",
+        "empty states",
+        "error states",
+        "retry",
+        "refine",
+        "uncertainty",
+        "active source"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What frontend UX requirements should be implemented?"
+    },
+    "overview": {
+      "citationExpectation": "May use full-document overview caveat when precise citations are unavailable; must not be generic insufficient evidence.",
+      "expectedDisplayStateKinds": [
+        "full_document_overview",
+        "grounded"
+      ],
+      "mustMention": [
+        "Full Stack AI Engineer Assessment",
+        "AI-powered full-stack application",
+        "backend",
+        "frontend",
+        "data",
+        "privacy",
+        "reliability",
+        "AWS",
+        "deliverables"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What is this document about?"
+    },
+    "reliabilityEvaluation": {
+      "evidenceSnippets": [
+        "The project should include targeted tests",
+        "The implementation should fail safely"
+      ],
+      "expectedDisplayStateKinds": [
+        "grounded"
+      ],
+      "mustMention": [
+        "targeted tests",
+        "authentication",
+        "ownership",
+        "ingestion",
+        "provider parsing",
+        "retrieval policy",
+        "chat answer states",
+        "UI regression",
+        "golden questions",
+        "fail safely",
+        "recovery action"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What reliability and evaluation evidence is expected?"
+    }
+  },
+  "fixtureId": "full-stack-ai-engineer-assessment",
+  "globalForbiddenDisplayPatterns": [
+    "```json",
+    "providerPayload",
+    "rawProviderPayload",
+    "retrievedChunkIds",
+    "chunk_",
+    "documentId",
+    "Traceback",
+    "MINIMAX_API_KEY=",
+    "AWS_SECRET_ACCESS_KEY="
+  ],
+  "schemaVersion": 1,
+  "unsupportedQuestions": [
+    {
+      "expectedDisplayStateKinds": [
+        "unsupported"
+      ],
+      "mustMention": [
+        "selected source",
+        "not covered",
+        "assessment"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "mustNotMention": [
+        "Buenos Aires"
+      ],
+      "question": "What is the capital of Argentina?"
+    },
+    {
+      "expectedDisplayStateKinds": [
+        "unsupported",
+        "insufficient_evidence"
+      ],
+      "mustMention": [
+        "selected source",
+        "does not provide",
+        "assessment requirements"
+      ],
+      "mustNotMatch": [
+        "```json",
+        "providerPayload",
+        "rawProviderPayload",
+        "retrievedChunkIds",
+        "chunk_",
+        "documentId",
+        "Traceback",
+        "MINIMAX_API_KEY=",
+        "AWS_SECRET_ACCESS_KEY="
+      ],
+      "question": "What salary should the company offer this candidate?"
+    }
+  ]
+}

@@ -30,6 +30,9 @@ const ACTIVE_CONTENT_PATTERNS = [
   /\/XFA\b/i,
 ];
 
+const MAX_SAFE_BASENAME_LENGTH = 96;
+const SECRET_SHAPED_FILENAME = /\b(api[_-]?key|secret|token|password|passwd|credential|private[_-]?key|aws[_-]?access[_-]?key|session[_-]?id)\b|(?:sk|pk|ghp|github_pat|xox[baprs])[-_][A-Za-z0-9_-]{8,}/i;
+
 export class PdfUploadError extends Error {
   constructor(message, { statusCode = 400, code = 'pdf_upload_failed', category } = {}) {
     super(message);
@@ -128,21 +131,67 @@ function ensureDeclaredLengthWithinLimit(headers, limits) {
   }
 }
 
-function sanitizeTitle(value) {
-  const title = String(value ?? '')
+function normalizeDisplayText(value) {
+  let normalized = String(value ?? '');
+  try {
+    normalized = normalized.normalize('NFKC');
+  } catch {
+    // Keep the original string when ICU normalization is unavailable.
+  }
+  return normalized
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  return title.slice(0, 160);
+}
+
+function truncateMiddle(value, maxLength = MAX_SAFE_BASENAME_LENGTH) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  const keep = Math.max(12, Math.floor((maxLength - 1) / 2));
+  return `${value.slice(0, keep)}…${value.slice(value.length - keep)}`;
+}
+
+function splitPdfExtension(basename) {
+  return /\.pdf$/i.test(basename)
+    ? { stem: basename.slice(0, -4), extension: '.pdf' }
+    : { stem: basename, extension: '' };
+}
+
+export function sanitizeOriginalPdfBasename(filename) {
+  const pathless = normalizeDisplayText(filename)
+    .split(/[\\/]+/)
+    .filter((segment) => segment && segment !== '.' && segment !== '..' && !segment.startsWith('.'))
+    .pop();
+  const candidate = normalizeDisplayText(pathless || 'uploaded-document.pdf')
+    .replace(/[\\/]/g, ' ')
+    .replace(/^\.+/, '')
+    .trim();
+  const { stem, extension } = splitPdfExtension(candidate || 'uploaded-document.pdf');
+  const safeStem = normalizeDisplayText(stem)
+    .replace(/[^\p{L}\p{N} ._()[\]-]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const basename = `${safeStem || 'uploaded-document'}${extension || '.pdf'}`;
+  if (SECRET_SHAPED_FILENAME.test(basename)) {
+    return 'redacted-filename.pdf';
+  }
+  return truncateMiddle(basename);
+}
+
+function sanitizeTitle(value) {
+  return normalizeDisplayText(value).slice(0, 160);
 }
 
 function titleFromFilename(filename) {
-  const basename = path.basename(String(filename || ''), path.extname(String(filename || '')));
-  return sanitizeTitle(basename) || 'Uploaded PDF';
+  const safeBasename = sanitizeOriginalPdfBasename(filename);
+  const { stem } = splitPdfExtension(safeBasename);
+  return sanitizeTitle(stem) || 'Uploaded PDF';
 }
 
 function extensionIsPdf(filename) {
-  return path.extname(String(filename || '')).toLowerCase() === '.pdf';
+  const pathless = normalizeDisplayText(filename).split(/[\\/]+/).pop() ?? '';
+  return /\.pdf$/i.test(pathless);
 }
 
 function contentTypeIsPdf(mimeType) {
@@ -313,13 +362,18 @@ export async function parsePdfUploadMultipart(request, { limits: rawLimits, temp
 
     await assertPdfLooksSafeForConversion({ filePath: tempPath, ...fileInfo, limits });
 
+    const safeOriginalBasename = sanitizeOriginalPdfBasename(fileInfo.filename);
     return {
       tempDir,
       path: tempPath,
-      title: title || titleFromFilename(fileInfo.filename),
-      originalFilename: path.basename(String(fileInfo.filename || 'document.pdf')),
-      mimeType: fileInfo.mimeType,
+      title: title || titleFromFilename(safeOriginalBasename),
+      originalFilename: safeOriginalBasename,
+      originalBasename: safeOriginalBasename,
+      safeOriginalBasename,
+      mimeType: String(fileInfo.mimeType || '').toLowerCase(),
       sizeBytes: fileSize,
+      sourceMethod: 'pdf_upload',
+      uploadedAt: new Date().toISOString(),
       limits,
     };
   } catch (error) {

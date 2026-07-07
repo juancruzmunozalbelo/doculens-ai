@@ -53,7 +53,7 @@ function buildChunkBlock(chunk, secrets) {
 function instructionForPrompt(promptId) {
   switch (promptId) {
     case 'doculens.analysis':
-      return 'Analyze the document and return structured JSON with summary, entities, obligations, risks, and uncertainties.';
+      return 'Analyze the document and return structured JSON with summary, sections, entities, requirements, obligations only when useful, deliverables, risks, uncertainties, and recommendedQuestions.';
     case 'doculens.fallback':
       return 'Use fallback full-document reasoning only for the provided document evidence and include uncertainty.';
     case 'doculens.unsupported':

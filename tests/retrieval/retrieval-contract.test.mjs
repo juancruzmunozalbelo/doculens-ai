@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const assessmentFixtureText = readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/full-stack-ai-engineer-assessment.txt'), 'utf8');
+const assessmentGoldenAssertions = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/golden-assertions.json'), 'utf8'));
+const assessmentManifest = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/manifest.json'), 'utf8'));
 const owner = Object.freeze({ id: '11111111-1111-4111-8111-111111111111', email: 'owner@example.com' });
 
 async function importRequired(relativePath, exportNames, purpose) {
@@ -586,6 +590,29 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       },
     },
     {
+      name: 'what-is-this-document-about routes to global-question fallback for source overview',
+      input: {
+        question: 'What is this document about?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+      },
+      expected: {
+        contextStrategy: 'fallback',
+        fallbackReason: 'global_question',
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
       name: 'outside-document current-facts question is unsupported instead of silently using full-document fallback',
       input: {
         question: 'What is the current stock price of Contoso today?',
@@ -636,6 +663,73 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
   for (const { name, input, expected } of cases) {
     await t.test(name, () => {
       assert.deepEqual(decideRetrievalStrategy(input), expected);
+    });
+  }
+});
+
+test('assessment golden questions map to overview, grounded, low-coverage, and unsupported retrieval policies', async (t) => {
+  const { decideRetrievalStrategy } = await importRequired(
+    'apps/api/src/server/retrieval/policy.mjs',
+    ['decideRetrievalStrategy'],
+    'Retrieval coverage policy',
+  );
+
+  for (const marker of assessmentManifest.titleMarkers) {
+    assert.match(assessmentFixtureText, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `assessment text fixture must contain marker ${marker}`);
+  }
+
+  const supportedChunks = [
+    { chunkId: 'assessment-backend', normalizedScore: 0.9 },
+    { chunkId: 'assessment-frontend', normalizedScore: 0.82 },
+  ];
+  const goldenQuestions = assessmentGoldenAssertions.chatGoldenQuestions;
+  const cases = [
+    {
+      name: 'overview question uses full-document fallback routing',
+      question: goldenQuestions.overview.question,
+      retrievedChunks: supportedChunks,
+      expected: { contextStrategy: 'fallback', fallbackReason: 'global_question', unsupportedReason: null },
+    },
+    ...Object.entries(goldenQuestions)
+      .filter(([name]) => name !== 'overview')
+      .map(([name, assertion]) => ({
+        name: `${name} question uses grounded RAG routing`,
+        question: assertion.question,
+        retrievedChunks: supportedChunks,
+        expected: { contextStrategy: 'rag', fallbackReason: null, unsupportedReason: null },
+      })),
+    {
+      name: 'specific salary question remains low-coverage instead of overview',
+      question: assessmentGoldenAssertions.unsupportedQuestions[1].question,
+      retrievedChunks: [{ chunkId: 'assessment-overview', normalizedScore: 0.08 }],
+      expected: { contextStrategy: 'fallback', fallbackReason: 'low_retrieval_coverage', unsupportedReason: null },
+    },
+    {
+      name: 'outside-source current fact question is unsupported',
+      question: assessmentGoldenAssertions.unsupportedQuestions[0].question,
+      retrievedChunks: [],
+      expected: { contextStrategy: 'unsupported', fallbackReason: null, unsupportedReason: 'outside_document_scope' },
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, () => {
+      const strategy = decideRetrievalStrategy({
+        question: currentCase.question,
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.35,
+        retrievedChunks: currentCase.retrievedChunks,
+      });
+
+      assert.deepEqual(
+        {
+          contextStrategy: strategy.contextStrategy,
+          fallbackReason: strategy.fallbackReason,
+          unsupportedReason: strategy.unsupportedReason,
+        },
+        currentCase.expected,
+        `${currentCase.name} must route according to the assessment golden-path policy`,
+      );
     });
   }
 });

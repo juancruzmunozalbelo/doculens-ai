@@ -26,6 +26,22 @@ function requireText(value, field) {
   return value.trim();
 }
 
+function sanitizeDocumentTitle(value) {
+  return requireText(value, 'title')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
+function displayTitleFor(row) {
+  const metadata = row?.metadata ?? {};
+  return row?.title
+    || metadata.safeOriginalBasename
+    || metadata.originalBasename
+    || 'Untitled source';
+}
+
 function documentNotFound() {
   return new DocumentAccessError('Document not found', 404);
 }
@@ -38,7 +54,7 @@ function publicDocument(row, { includeContent = true } = {}) {
   const document = {
     id: row.id,
     userId: row.userId ?? row.user_id,
-    title: row.title,
+    title: displayTitleFor(row),
     sourceType: row.sourceType ?? row.source_type ?? 'markdown',
     status: row.status ?? 'ready',
     tokenEstimate: row.tokenEstimate ?? row.token_estimate ?? 0,
@@ -126,6 +142,15 @@ export function createInMemoryDocumentRepository(initialDocuments = []) {
       const document = documents.get(documentId);
       return visible(document) && document.userId === userId ? document : null;
     },
+    async updateTitleForUser({ documentId, userId, title }) {
+      const document = documents.get(documentId);
+      if (!visible(document) || document.userId !== userId) {
+        return null;
+      }
+      document.title = title;
+      document.updatedAt = new Date().toISOString();
+      return document;
+    },
     async deleteByIdForUser({ documentId, userId }) {
       const document = documents.get(documentId);
       if (!visible(document) || document.userId !== userId) {
@@ -181,7 +206,7 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
 
     const created = await documents.createForUser({
       userId: user.id,
-      title: requireText(title, 'title'),
+      title: sanitizeDocumentTitle(title),
       content: normalizedContent,
       sourceType,
       metadata,
@@ -232,13 +257,40 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
     return publicDocument(document);
   }
 
+  async function updateDocumentTitle({ currentUser, documentId, title }) {
+    const user = requireCurrentUser(currentUser);
+    if (typeof documents.updateTitleForUser !== 'function') {
+      throw documentNotFound();
+    }
+    const updated = await documents.updateTitleForUser({
+      documentId,
+      userId: user.id,
+      title: sanitizeDocumentTitle(title),
+    });
+    if (!updated) {
+      throw documentNotFound();
+    }
+    return publicDocument(updated);
+  }
+
   async function deleteDocument({ currentUser, documentId }) {
     const user = requireCurrentUser(currentUser);
     const deleted = await documents.deleteByIdForUser({ documentId, userId: user.id });
     if (!deleted) {
       throw documentNotFound();
     }
-    return { deleted: true, documentId };
+    const remainingRows = typeof documents.listForUser === 'function'
+      ? await documents.listForUser({ userId: user.id })
+      : [];
+    const remainingDocuments = remainingRows.map((document) => publicDocument(document, { includeContent: false }));
+    const nextDocument = remainingDocuments[0] ?? null;
+    return {
+      deleted: true,
+      deletedDocumentId: documentId,
+      activeDocumentId: nextDocument?.id ?? null,
+      nextDocument,
+      documents: remainingDocuments,
+    };
   }
 
   async function authorizeDocumentChildResource({ currentUser, documentId, resourceType, action }) {
@@ -283,6 +335,7 @@ export function createDocumentService({ documents, chunks, ingestion = {} } = {}
     listDocuments,
     getDocument,
     deleteDocument,
+    updateDocumentTitle,
     authorizeDocumentChildResource,
     listAnalysis,
     listMessages,

@@ -734,14 +734,32 @@ test('document create, list, read, and delete endpoints are scoped to the authen
     assert.equal(aliceRead.status, 200, 'Alice must be able to read her own document by id');
     assert.match(JSON.stringify(aliceRead.body), /ALICE_NDA_SECRET_OWNERSHIP_CANARY/, 'owner read must return the owner document content');
 
+    const aliceRename = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, {
+      method: 'PATCH',
+      token: alice.accessToken,
+      body: { title: 'Alice Renamed Source' },
+    });
+    assert.equal(aliceRename.status, 200, 'owner rename must succeed');
+    assert.equal(aliceRename.body.document.title, 'Alice Renamed Source');
+    assert.match(aliceRename.body.document.content, /ALICE_NDA_SECRET_OWNERSHIP_CANARY/, 'rename must preserve owner document content');
+
+    const bobRenameAlice = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, {
+      method: 'PATCH',
+      token: bob.accessToken,
+      body: { title: 'Bob Stolen Title' },
+    });
+    assertDeniedWithoutLeak(bobRenameAlice, [aliceContentCanary, 'Alice Renamed Source', 'Bob Stolen Title'], 'Bob direct rename of Alice document');
+    const aliceReadAfterBobRenameAttempt = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, { token: alice.accessToken });
+    assert.equal(aliceReadAfterBobRenameAttempt.body.document.title, 'Alice Renamed Source', 'failed cross-user rename must not change owner title');
+
     const bobReadAlice = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, { token: bob.accessToken });
-    assertDeniedWithoutLeak(bobReadAlice, [aliceContentCanary, 'Alice NDA'], 'Bob direct read of Alice document');
+    assertDeniedWithoutLeak(bobReadAlice, [aliceContentCanary, 'Alice Renamed Source'], 'Bob direct read of Alice document');
 
     const bobDeleteAlice = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, {
       method: 'DELETE',
       token: bob.accessToken,
     });
-    assertDeniedWithoutLeak(bobDeleteAlice, [aliceContentCanary, 'Alice NDA'], 'Bob direct delete of Alice document');
+    assertDeniedWithoutLeak(bobDeleteAlice, [aliceContentCanary, 'Alice Renamed Source'], 'Bob direct delete of Alice document');
 
     const aliceReadAfterBobDeleteAttempt = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, { token: alice.accessToken });
     assert.equal(aliceReadAfterBobDeleteAttempt.status, 200, 'failed cross-user delete must not remove the owner document');
@@ -750,7 +768,16 @@ test('document create, list, read, and delete endpoints are scoped to the authen
       method: 'DELETE',
       token: alice.accessToken,
     });
-    assert.ok([200, 204].includes(aliceDelete.status), 'owner delete must succeed');
+    assert.equal(aliceDelete.status, 200, 'owner delete must succeed with active-source recovery state');
+    assert.equal(aliceDelete.body.deleted, true);
+    assert.equal(aliceDelete.body.deletedDocumentId, aliceDocumentId);
+    assert.notEqual(aliceDelete.body.activeDocumentId, aliceDocumentId, 'deleted source cannot remain active in recovery payload');
+    assert.equal(
+      (aliceDelete.body.documents ?? []).some((document) => document.id === aliceDocumentId),
+      false,
+      'deleted source cannot remain in recovered source list',
+    );
+    assert.equal(aliceDelete.body.nextDocument?.id ?? aliceDelete.body.activeDocumentId, null, 'empty remaining source list must recover to empty state');
 
     const aliceReadAfterDelete = await requestJson(baseUrl, `/api/documents/${aliceDocumentId}`, { token: alice.accessToken });
     assert.equal(aliceReadAfterDelete.status, 404, 'deleted owner document must no longer be readable');
@@ -801,6 +828,15 @@ test('document service uses owner-scoped resource-id queries and authorizes chil
       ownedDocuments.delete(documentId);
       return true;
     },
+    async updateTitleForUser({ documentId, userId, title }) {
+      const document = ownedDocuments.get(documentId);
+      if (!document || document.userId !== userId) {
+        return null;
+      }
+      document.title = title;
+      document.updatedAt = fixedNow.toISOString();
+      return document;
+    },
   };
   const documents = createDocumentService({ documents: repository });
   const alice = { id: 'user-alice', email: 'alice.service@example.test' };
@@ -827,6 +863,16 @@ test('document service uses owner-scoped resource-id queries and authorizes chil
     'deleteDocument must use both document id and current user id so another owner cannot delete it',
   );
   assert.equal(ownedDocuments.has('alice-existing-doc'), true, 'failed cross-user delete must leave the owner document intact');
+
+  const renamed = await documents.updateDocumentTitle({ currentUser: alice, documentId: 'alice-existing-doc', title: 'Alice Updated NDA' });
+  assert.equal(renamed.title, 'Alice Updated NDA', 'updateDocumentTitle must persist a reviewer-facing title');
+  assert.equal(renamed.content, 'ALICE_EXISTING_DOC_PRIVATE_TEXT', 'updateDocumentTitle must not change document content');
+  await assert.rejects(
+    () => documents.updateDocumentTitle({ currentUser: bob, documentId: 'alice-existing-doc', title: 'Bob Updated NDA' }),
+    /not found|forbidden|unauthorized/i,
+    'updateDocumentTitle must use both document id and current user id so another owner cannot rename it',
+  );
+  assert.equal(ownedDocuments.get('alice-existing-doc').title, 'Alice Updated NDA', 'failed cross-user rename must leave the owner title intact');
 
   const childResourceChecks = [
     ['analysis', 'read'],

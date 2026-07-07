@@ -1,4 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const assessmentFixtureManifest = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/manifest.json'), 'utf8'));
+const assessmentGoldenAssertions = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/assessment/golden-assertions.json'), 'utf8'));
+const assessmentFixturePdf = readFileSync(path.join(repoRoot, assessmentFixtureManifest.files.pdf.path));
 
 const TEST_IDS = Object.freeze({
   email: 'auth.email-input',
@@ -61,6 +69,7 @@ const sampleDocumentId = 'seed-nda-contract';
 const pastedDocumentId = 'doc-ui-e2e-001';
 const pdfDocumentId = 'doc-ui-pdf-001';
 const recentDocumentId = 'doc-recent-needs-detail';
+const assessmentDocumentId = 'doc-ui-assessment-pdf-001';
 const rawChunkUuid = '018f4d31-229a-7cc8-9f9d-uuid-raw-confidentiality';
 const secondRawChunkUuid = '018f4d31-229a-7cc8-9f9d-uuid-raw-return';
 const rawProviderResponseId = 'provider-response-ui-raw-123';
@@ -102,6 +111,29 @@ const recentDetailedDocument = Object.freeze({
     'The vendor must deliver a monthly uptime report and notify the customer about critical incidents within one business day.',
     'The agreement requires service credits when monthly uptime falls below the committed threshold.',
   ].join('\n'),
+});
+
+const assessmentDocument = Object.freeze({
+  id: assessmentDocumentId,
+  title: 'Full Stack AI Engineer Assessment',
+  status: 'ready',
+  sourceType: 'pdf',
+  content: [
+    '# Full Stack AI Engineer Assessment',
+    'Backend requirements include a REST API, LLM provider boundary, persistence, JWT authentication, ownership checks, and source retrieval.',
+    'Frontend requirements include React, source intake, review briefing, starter questions, chat input, answer cards, inspectable evidence, loading states, empty states, error states, retry, refine, uncertainty, and active source.',
+    'Data, privacy, and logging expectations cover stored document data, third-party AI provider use, retention, logs, raw document text, provider payloads, stack traces, secret-shaped values, safe original basename, MIME type, upload time, and source control.',
+    'Deployment requirements include AWS, Terraform or CloudFormation, configuration from code, managed secret stores, scaling considerations, API, database, PDF processing, AI provider latency, and teardown.',
+    'Deliverables include a Git repository, runnable local setup instructions, README, architecture, AI design, data flow, privacy decisions, reliability strategy, deployment approach, trade-offs, targeted tests, and safe AI provider configuration.',
+  ].join('\n'),
+  metadata: {
+    originalBasename: assessmentFixtureManifest.sourceMetadataExpectations.originalBasename,
+    safeOriginalBasename: assessmentFixtureManifest.sourceMetadataExpectations.safeOriginalBasename,
+    mimeType: assessmentFixtureManifest.sourceMetadataExpectations.mimeType,
+    sizeBytes: assessmentFixtureManifest.sourceMetadataExpectations.sizeBytes,
+    sourceMethod: assessmentFixtureManifest.sourceMetadataExpectations.sourceMethod,
+    uploadedAt: '2026-07-07T12:00:00.000Z',
+  },
 });
 
 const analysisMetadata = Object.freeze({
@@ -147,6 +179,21 @@ const fallbackMetadata = Object.freeze({
   retrievedChunkIds: [],
   retrievalScoreSummary: { topScore: 0.12, averageScore: 0.1, passingChunks: 0, relevanceThreshold: 0.35 },
   citationPolicy: 'fallback_full_document_no_chunk_citations',
+});
+
+const overviewMetadata = Object.freeze({
+  ...ragMetadata,
+  promptId: 'doculens.fallback',
+  contextStrategy: 'fallback',
+  fallbackReason: 'global_question',
+  retrievedChunkIds: [],
+  retrievalScoreSummary: { topScore: 0.9, averageScore: 0.9, passingChunks: 1, relevanceThreshold: 0.35 },
+  citationPolicy: 'full_document_overview_no_chunk_citations',
+  displayState: {
+    kind: 'full_document_overview',
+    label: 'Full-document overview',
+    message: 'This is a full-document overview, not a precisely cited answer.',
+  },
 });
 
 const unsupportedMetadata = Object.freeze({
@@ -272,6 +319,63 @@ function analysisFor(document) {
   };
 }
 
+function assessmentAnalysisFor() {
+  return {
+    summary: 'Full Stack AI Engineer Assessment for an AI-powered full-stack application covering backend, frontend, data flow, privacy, reliability, AWS deployment, and deliverables.',
+    sections: assessmentGoldenAssertions.analysis.sections.expectedTitles.map((title) => ({ title, summary: `${title} requirements from the assessment source.` })),
+    entities: [{ name: 'Full Stack AI Engineer Assessment', type: 'assessment' }],
+    requirements: assessmentGoldenAssertions.analysis.requirements.mustMention.map((text) => ({ category: 'Assessment requirement', text })),
+    obligations: [],
+    deliverables: assessmentGoldenAssertions.analysis.deliverables.mustMention.map((text) => ({ text })),
+    risks: assessmentGoldenAssertions.analysis.risks.mustMentionSupportedOrDerived.map((text) => ({ severity: 'medium', text, derivedReviewerRisk: true })),
+    uncertainties: ['The assessment leaves implementation choices to the candidate when the source does not mandate one.'],
+    recommendedQuestions: assessmentGoldenAssertions.analysis.recommendedQuestions,
+    metadata: analysisMetadata,
+  };
+}
+
+function assessmentAnswerFor(question) {
+  const entry = Object.values(assessmentGoldenAssertions.chatGoldenQuestions).find((assertion) => assertion.question === question);
+  if (entry?.question === assessmentGoldenAssertions.chatGoldenQuestions.overview.question) {
+    return {
+      answer: {
+        text: entry.mustMention.join(' '),
+        citations: [],
+        uncertainty: 'medium',
+        state: 'full_document_overview',
+        displayState: overviewMetadata.displayState,
+        metadata: overviewMetadata,
+      },
+      retrievedChunks: [],
+      question,
+    };
+  }
+
+  const answerAssertion = entry ?? assessmentGoldenAssertions.chatGoldenQuestions.backend;
+  const quote = answerAssertion.evidenceSnippets?.[0] ?? answerAssertion.mustMention[0];
+  return {
+    answer: {
+      text: answerAssertion.mustMention.join(' '),
+      citations: [{ chunkId: rawChunkUuid, label: 'Assessment evidence', quote, citationIndex: 1 }],
+      uncertainty: 'low',
+      state: 'grounded',
+      displayState: { kind: 'grounded', label: 'Based on this document', message: 'Based on this document.' },
+      metadata: ragMetadata,
+      unsafeProviderPayload: rawProviderPayloadCanary,
+    },
+    retrievedChunks: [{
+      chunkId: rawChunkUuid,
+      label: 'Assessment evidence',
+      headingPath: ['Full Stack AI Engineer Assessment', 'Assessment evidence'],
+      text: quote,
+      contentExcerpt: quote,
+      normalizedScore: 0.923456,
+      metadata: { raw: rawMetadataJsonCanary },
+    }],
+    question,
+  };
+}
+
 function groundedAnswerFor(document, question) {
   const isRecent = document.id === recentDocumentId;
   const safeAnswer = isRecent
@@ -367,7 +471,7 @@ async function installDocuLensApiFake(page, {
       if (delayAnalysisUntil) {
         await delayAnalysisUntil(route.request());
       }
-      await fulfillJson(route, 201, { analysis: analysisFor(document) });
+      await fulfillJson(route, 201, { analysis: document.id === assessmentDocumentId ? assessmentAnalysisFor() : analysisFor(document) });
     });
 
     await page.route(`**/api/documents/${documentId}/chat`, async (route) => {
@@ -375,6 +479,26 @@ async function installDocuLensApiFake(page, {
       expect(route.request().headers().authorization).toBe(`Bearer ${accessToken}`);
       const { question } = route.request().postDataJSON();
       onChatRequest?.({ documentId, question });
+
+      if (document.id === assessmentDocumentId) {
+        if (/capital|salary/i.test(question)) {
+          await fulfillJson(route, 200, {
+            answer: {
+              text: 'This question is outside the selected source or not covered by the assessment requirements. Ask about backend, frontend, data, reliability, deployment, or deliverables.',
+              unsupported: true,
+              citations: [],
+              uncertainty: null,
+              state: 'unsupported',
+              displayState: { kind: 'unsupported', label: 'Outside this document', message: 'Outside the selected source.' },
+              metadata: unsupportedMetadata,
+            },
+            retrievedChunks: [],
+          });
+          return;
+        }
+        await fulfillJson(route, 201, assessmentAnswerFor(question));
+        return;
+      }
 
       if (/provider error/i.test(question)) {
         await fulfillJson(route, 503, {
@@ -402,18 +526,15 @@ async function installDocuLensApiFake(page, {
         return;
       }
 
-      if (/whole document|summarize everything/i.test(question)) {
+      if (/whole document|summarize everything|what is this document about/i.test(question)) {
         await fulfillJson(route, 201, {
           answer: {
-            text: 'Fallback analysis: the NDA centers on confidentiality, compelled disclosure, and material return duties.',
+            text: 'The document is a mutual NDA about protecting confidential information, permitted legal disclosures, and returning or destroying materials.',
             citations: [],
             uncertainty: 'medium',
-            state: 'fallback',
-            suggestedRefinements: [
-              'Ask about confidentiality duties.',
-              'Ask which sections mention return or destruction of materials.',
-            ],
-            metadata: fallbackMetadata,
+            state: 'full_document_overview',
+            displayState: overviewMetadata.displayState,
+            metadata: overviewMetadata,
           },
           retrievedChunks: [],
         });
@@ -456,11 +577,12 @@ async function installDocuLensApiFake(page, {
       return;
     }
 
-    expect(body).toMatch(/filename="Acme-Beta-NDA\.pdf"/);
+    const isAssessmentUpload = body.includes(assessmentFixtureManifest.sourceMetadataExpectations.originalBasename);
+    expect(body).toMatch(isAssessmentUpload ? new RegExp(`filename="${assessmentFixtureManifest.sourceMetadataExpectations.originalBasename}"`) : /filename="Acme-Beta-NDA\.pdf"/);
     if (delayPdfUntil) {
       await delayPdfUntil(route.request());
     }
-    const document = {
+    const document = isAssessmentUpload ? assessmentDocument : {
       id: pdfDocumentId,
       title: 'Acme Beta PDF NDA',
       content: 'Acme must keep Beta financial information confidential for three years in this PDF source.',
@@ -484,6 +606,35 @@ async function installDocuLensApiFake(page, {
     onChatRequest?.({ documentId: pdfDocumentId, question });
     await fulfillJson(route, 201, groundedAnswerFor({ ...sampleDocument, id: pdfDocumentId, title: 'Acme Beta PDF NDA' }, question));
   });
+
+  await page.route(`**/api/documents/${assessmentDocumentId}/analysis`, async (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers().authorization).toBe(`Bearer ${accessToken}`);
+    await fulfillJson(route, 201, { analysis: assessmentAnalysisFor() });
+  });
+
+  await page.route(`**/api/documents/${assessmentDocumentId}/chat`, async (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers().authorization).toBe(`Bearer ${accessToken}`);
+    const { question } = route.request().postDataJSON();
+    onChatRequest?.({ documentId: assessmentDocumentId, question });
+    if (/capital|salary/i.test(question)) {
+      await fulfillJson(route, 200, {
+        answer: {
+          text: 'This question is outside the selected source or not covered by the assessment requirements. Ask about backend, frontend, data, reliability, deployment, or deliverables.',
+          unsupported: true,
+          citations: [],
+          uncertainty: null,
+          state: 'unsupported',
+          displayState: { kind: 'unsupported', label: 'Outside this document', message: 'Outside the selected source.' },
+          metadata: unsupportedMetadata,
+        },
+        retrievedChunks: [],
+      });
+      return;
+    }
+    await fulfillJson(route, 201, assessmentAnswerFor(question));
+  });
 }
 
 async function openSampleSource(page) {
@@ -491,6 +642,9 @@ async function openSampleSource(page) {
   if (await existingCard.count()) {
     await existingCard.click();
     return;
+  }
+  if (!(await byTestId(page, 'sampleCta').count())) {
+    await page.getByLabel('Try sample').check();
   }
   await byTestId(page, 'sampleCta').click();
 }
@@ -516,18 +670,18 @@ test('source-first notebook creates a ready active source, offers briefing and s
   await signIn(page);
 
   await expect(byTestId(page, 'sourceCreate')).toBeVisible();
-  await expect(byTestId(page, 'sourceCreate')).toContainText(/create (a )?source|start a review/i);
+  await expect(byTestId(page, 'sourceCreate')).toContainText(/Add source|One flow for PDF|create (a )?source|start a review/i);
   await expect(byTestId(page, 'sourceCreate')).toContainText(/sample|pdf|paste/i);
   await expectQuietPrimaryCopy(page);
 
-  await byTestId(page, 'sampleCta').click();
+  await openSampleSource(page);
 
   await expect(byTestId(page, 'sourceRail')).toBeVisible();
   const sourceCard = byTestId(page, 'sourceCard').filter({ hasText: sampleDocument.title }).first();
   await expect(sourceCard).toBeVisible();
   await expect(sourceCard).toContainText(/Ready/i);
   await expect(byTestId(page, 'activeSource')).toContainText(sampleDocument.title);
-  await expect(byTestId(page, 'sourceStatus')).toContainText(/Ready/i);
+  await expect(byTestId(page, 'activeSource').getByTestId(TEST_IDS.sourceStatus)).toContainText(/Ready/i);
   await expect(byTestId(page, 'evidencePanel')).toContainText(sampleDocument.title);
   await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/financial information confidential for three years/i);
 
@@ -544,13 +698,13 @@ test('source-first notebook creates a ready active source, offers briefing and s
   await byTestId(page, 'starterQuestion').first().click();
   await expect(byTestId(page, 'chatInput')).toHaveValue(starterText);
   await byTestId(page, 'chatSubmit').click();
-  await expect(byTestId(page, 'answerCard').first()).toContainText(/Based on this document|Acme must protect Beta financial information/i);
+  await expect(byTestId(page, 'answerCard').first()).toContainText(/Based on this (?:document|source)|Full-document overview|Source overview|Acme must protect Beta financial information|mutual NDA/i);
   expect(chatRequests.at(-1)).toMatchObject({ documentId: sampleDocumentId, question: starterText });
   await expect(byTestId(page, 'activeSource')).toContainText(sampleDocument.title);
 
   const analyzeClick = byTestId(page, 'documentAnalyze').click();
-  await expect(byTestId(page, 'loading')).toContainText(/Generating summary|Generating review briefing|Preparing document/i);
-  await expect(byTestId(page, 'loading')).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
+  await expect(byTestId(page, 'loading').first()).toContainText(/Generating summary|Generating review briefing|Preparing document|Building briefing/i);
+  await expect(byTestId(page, 'loading').first()).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
   releaseAnalysis();
   await analyzeClick;
 
@@ -570,8 +724,8 @@ test('answer cards normalize JSON-shaped provider text and inline citations sele
 
   const answerCard = byTestId(page, 'answerCard').first();
   await expect(answerCard).toContainText('Acme must protect Beta financial information for three years');
-  await expect(answerCard).toContainText(/Based on this document/i);
-  await expect(byTestId(page, 'trustSummary')).toContainText(/Based on this document/i);
+  await expect(answerCard).toContainText(/Based on this (?:document|source)/i);
+  await expect(byTestId(page, 'trustSummary')).toContainText(/Based on this (?:document|source)/i);
   await expect(byTestId(page, 'trustSummary')).toContainText(/1\s+citation/i);
   await expect(answerCard).not.toContainText(UNSAFE_VISIBLE_TEXT);
   await expect(answerCard).not.toContainText(/\{"answer"|provider_response_id|RAW_PROVIDER_PAYLOAD_UI_CANARY|SYSTEM_POLICY_UI_CANARY/i);
@@ -593,18 +747,18 @@ test('answer cards normalize JSON-shaped provider text and inline citations sele
   await expectNoUnsafeReviewerArtifacts(page);
 });
 
-test('fallback without citations renders not-enough-evidence guidance and outside-document questions render an unsupported state', async ({ page }) => {
+test('full-document overview without citations renders a caveated overview and outside-document questions render an unsupported state', async ({ page }) => {
   await installDocuLensApiFake(page, { documents: [sampleDocument] });
   await signIn(page);
   await openSampleSource(page);
 
   await askQuestion(page, 'Summarize the whole document.');
   const fallbackCard = byTestId(page, 'answerCard').first();
-  await expect(fallbackCard).toContainText(/Not enough evidence|Insufficient evidence/i);
-  await expect(fallbackCard).toContainText(/refine|specific|ask about confidentiality|ask which sections/i);
-  await expect(fallbackCard).not.toContainText(/Fallback analysis: the NDA centers on confidentiality, compelled disclosure, and material return duties/i);
-  await expect(fallbackCard).not.toContainText(/fallback|low_retrieval_coverage|citation-quality|chunk|0 citations/i);
-  await expect(byTestId(page, 'trustSummary')).toContainText(/Not enough evidence|Insufficient evidence/i);
+  await expect(fallbackCard).toContainText(/full-document overview|overview|source-wide/i);
+  await expect(fallbackCard).toContainText(/mutual NDA|protecting confidential information|permitted legal disclosures|returning or destroying materials/i);
+  await expect(fallbackCard).toContainText(/not claiming precise citation coverage|not precise citation|without precise citations|caveat/i);
+  await expect(fallbackCard).not.toContainText(/Not enough evidence|Insufficient evidence|low_retrieval_coverage|citation-quality|chunk|0 citations/i);
+  await expect(byTestId(page, 'trustSummary')).toContainText(/full-document overview|overview/i);
   await expect(byTestId(page, 'inlineCitation')).toHaveCount(0);
 
   await askQuestion(page, 'What is Acme stock price?');
@@ -662,19 +816,156 @@ test('PDF upload shows selected and reading states, then creates a ready PDF sou
   await expect(byTestId(page, 'pdfPanel')).not.toContainText(/converter|conversion timeout|normalization|chunk/i);
 
   const submit = byTestId(page, 'pdfSubmit').click();
-  await expect(byTestId(page, 'pdfStatus')).toContainText(/Reading PDF|Preparing document/i);
+  await expect(byTestId(page, 'pdfStatus')).toContainText(/Uploading PDF|Reading text|Preparing source|Opening workspace|Reading PDF|Preparing document/i);
   await expect(byTestId(page, 'pdfStatus')).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
-  await expect(byTestId(page, 'sourceCard').filter({ hasText: 'Acme-Beta-NDA.pdf' }).first()).toContainText(/Reading PDF|Preparing document/i);
+  await expect(byTestId(page, 'sourceCard').filter({ hasText: 'Acme-Beta-NDA.pdf' }).first()).toContainText(/Preparing|Uploading PDF|Reading text|Preparing source|Opening workspace|Reading PDF|Preparing document/i);
   releasePdf();
   await submit;
 
   await expect(byTestId(page, 'activeSource')).toContainText('Acme Beta PDF NDA');
-  await expect(byTestId(page, 'sourceStatus')).toContainText(/Ready/i);
+  await expect(byTestId(page, 'activeSource').getByTestId(TEST_IDS.sourceStatus)).toContainText(/Ready/i);
   await expect(byTestId(page, 'sourceCard').filter({ hasText: 'Acme Beta PDF NDA' }).first()).toContainText(/Ready/i);
   await expect(byTestId(page, 'reviewBriefing')).toContainText(/Generate (review )?(summary|briefing)/i);
   await expect(byTestId(page, 'starterQuestions')).toBeVisible();
   await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/financial information confidential/i);
   await expectQuietPrimaryCopy(page);
+  await expectNoUnsafeReviewerArtifacts(page);
+});
+
+test('assessment PDF golden path uploads fixture, opens source metadata, generates briefing, and answers golden questions safely', async ({ page }) => {
+  const chatRequests = [];
+  await installDocuLensApiFake(page, {
+    documents: [],
+    onChatRequest: (request) => chatRequests.push(request),
+  });
+  await signIn(page);
+
+  await byTestId(page, 'pdfInput').setInputFiles({
+    name: assessmentFixtureManifest.sourceMetadataExpectations.originalBasename,
+    mimeType: assessmentFixtureManifest.files.pdf.mimeType,
+    buffer: assessmentFixturePdf,
+  });
+  await expect(byTestId(page, 'pdfSelected')).toContainText(assessmentFixtureManifest.sourceMetadataExpectations.originalBasename);
+  await byTestId(page, 'pdfSubmit').click();
+
+  const sourceCard = byTestId(page, 'sourceCard').filter({ hasText: assessmentDocument.title }).first();
+  await expect(sourceCard).toBeVisible();
+  await expect(sourceCard).toContainText(/PDF/i);
+  await expect(sourceCard).toContainText(/Ready/i);
+  await expect(sourceCard).toContainText(/full-stack-ai-engineer-assessment\.pdf/i);
+  await expect(sourceCard).toContainText(/uploaded|2026|KB|7\.6|7818/i);
+  await expect(byTestId(page, 'activeSource')).toContainText(/Full Stack AI Engineer Assessment/i);
+  await expect(byTestId(page, 'activeSource').getByTestId(TEST_IDS.sourceStatus)).toContainText(/Ready/i);
+  await expect(byTestId(page, 'evidencePanel')).toContainText(/Source preview|Full Stack AI Engineer Assessment/i);
+  await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Backend requirements|Frontend requirements|Data, privacy/i);
+
+  await byTestId(page, 'documentAnalyze').click();
+  const briefing = byTestId(page, 'reviewBriefing');
+  await expect(briefing).toContainText(/Full Stack AI Engineer Assessment/i);
+  for (const term of assessmentGoldenAssertions.analysis.summary.mustMention) {
+    await expect(briefing).toContainText(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  }
+  for (const term of ['REST API', 'JWT authentication', 'React', 'loading states', 'PII', 'AWS', 'README']) {
+    await expect(briefing).toContainText(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  }
+  await expect(briefing).toContainText(/Requirements|Deliverables|Risks|Recommended questions/i);
+  await expect(briefing).not.toContainText(/```json|\[object Object\]|providerPayload|retrievedChunkIds|chunk_|documentId|Traceback|MINIMAX_API_KEY/i);
+  await expect(byTestId(page, 'starterQuestions')).toContainText(/backend requirements|frontend UX|deployment|deliverables|what is this document about/i);
+
+  for (const assertion of Object.values(assessmentGoldenAssertions.chatGoldenQuestions)) {
+    await askQuestion(page, assertion.question);
+    const answerCard = byTestId(page, 'answerCard').filter({ hasText: assertion.question }).first();
+    for (const term of assertion.mustMention) {
+      await expect(answerCard).toContainText(new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+    }
+    await expect(answerCard).not.toContainText(/```json|providerPayload|rawProviderPayload|retrievedChunkIds|chunk_|documentId|Traceback|MINIMAX_API_KEY|AWS_SECRET_ACCESS_KEY/i);
+    if (assertion.expectedDisplayStateKinds.includes('full_document_overview')) {
+      await expect(answerCard).toContainText(/overview|full-document|source-wide|Based on this (?:document|source)/i);
+    } else {
+      await expect(answerCard).toContainText(/Based on this (?:document|source)/i);
+      await expect(byTestId(page, 'inlineCitation').first()).toBeVisible();
+    }
+  }
+  expect(chatRequests.map((request) => request.documentId).every((documentId) => documentId === assessmentDocumentId)).toBe(true);
+  await expectNoUnsafeReviewerArtifacts(page);
+});
+
+test('product shell exposes DocuLens favicon metadata and keeps active source visible on desktop, mobile, and reduced motion', async ({ page }) => {
+  let releaseAnalysis;
+  const analysisGate = new Promise((resolve) => {
+    releaseAnalysis = resolve;
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await installDocuLensApiFake(page, {
+    documents: [sampleDocument],
+    delayAnalysisUntil: async () => {
+      await analysisGate;
+    },
+  });
+  await page.goto('/');
+
+  const shellMetadata = await page.evaluate(() => ({
+    title: document.title,
+    description: document.querySelector('meta[name="description"]')?.getAttribute('content') ?? '',
+    themeColor: document.querySelector('meta[name="theme-color"]')?.getAttribute('content') ?? '',
+    iconHrefs: [...document.querySelectorAll('link[rel~="icon"]')].map((link) => link.getAttribute('href') ?? ''),
+    reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  }));
+  expect(shellMetadata.title).toMatch(/DocuLens/i);
+  expect(shellMetadata.description).toMatch(/document|review|source|AI/i);
+  expect(shellMetadata.themeColor).toMatch(/^#|rgb|hsl/i);
+  expect(shellMetadata.iconHrefs.length).toBeGreaterThan(0);
+  expect(shellMetadata.iconHrefs.join(' ')).not.toMatch(/vite|missing|placeholder/i);
+  expect(shellMetadata.reducedMotion).toBe(true);
+  const iconResponse = await page.request.get(new URL(shellMetadata.iconHrefs[0], page.url()).href);
+  expect(iconResponse.ok()).toBe(true);
+
+  await expectLoginControls(page);
+  await byTestId(page, 'email').fill('demo@doculens.local');
+  await byTestId(page, 'password').fill('Correct Horse Battery Staple');
+  await byTestId(page, 'loginSubmit').click();
+  await openSampleSource(page);
+  await expect(byTestId(page, 'activeSource')).toBeVisible();
+  await expect(byTestId(page, 'sourceRail')).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 760 });
+  await expect(byTestId(page, 'activeSource')).toBeVisible();
+  await expect(byTestId(page, 'workspaceRoot')).toContainText(sampleDocument.title);
+
+  const analyzeClick = byTestId(page, 'documentAnalyze').click();
+  await expect(byTestId(page, 'loading').first()).toContainText(/Generating summary|Generating review briefing|Preparing document|Building briefing/i);
+  await expect(byTestId(page, 'loading').first()).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
+  releaseAnalysis();
+  await analyzeClick;
+});
+
+test('keyboard citations, aria labels, print output, and error retry UI do not leak technical details', async ({ page }) => {
+  await installDocuLensApiFake(page, { documents: [sampleDocument] });
+  await signIn(page);
+  await openSampleSource(page);
+  await askQuestion(page, 'What must Acme keep confidential?');
+
+  await byTestId(page, 'inlineCitation').first().focus();
+  await page.keyboard.press('Enter');
+  await expect(byTestId(page, 'evidencePanel')).toContainText(/confidential for three years/i);
+
+  const ariaText = await page.locator('[aria-label], [role="status"], [aria-live]').evaluateAll((nodes) => nodes.map((node) => [
+    node.getAttribute('aria-label'),
+    node.getAttribute('role'),
+    node.getAttribute('aria-live'),
+    node.textContent,
+  ].filter(Boolean).join(' ')).join('\n'));
+  expect(ariaText).not.toMatch(UNSAFE_VISIBLE_TEXT);
+  expect(ariaText).not.toMatch(/018f4d31|chunkId|retrievedChunkIds|provider-response-ui-raw|RAW_PROVIDER_PAYLOAD|SYSTEM_POLICY|MINIMAX_API_KEY/i);
+
+  await askQuestion(page, 'provider error please');
+  await expect(byTestId(page, 'error')).toContainText(/try again|retry|could not|unable|error/i);
+  await expect(byTestId(page, 'error')).not.toContainText(/Traceback|\/Users\/|MINIMAX_API_KEY|RAW_PROVIDER_PAYLOAD|SYSTEM_POLICY|stack|stderr|stdout/i);
+  await expect(byTestId(page, 'chatInput')).toHaveValue(/provider error please/i);
+
+  await byTestId(page, 'documentAnalyze').click();
+  await page.emulateMedia({ media: 'print' });
+  await expect(byTestId(page, 'printOutput')).not.toContainText(/technical details|provider response|providerPayload|retrievedChunkIds|chunkId|Traceback|MINIMAX_API_KEY|SYSTEM_POLICY/i);
   await expectNoUnsafeReviewerArtifacts(page);
 });
 
