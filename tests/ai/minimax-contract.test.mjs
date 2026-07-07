@@ -589,6 +589,39 @@ test('live-call budget gate rejects over-budget requests before MiniMax transpor
   assert.deepEqual(transportCalls, [], 'budget gate must run before the provider invokes network transport');
 });
 
+test('estimated-cost budget rejects otherwise in-token requests before MiniMax transport invocation', async () => {
+  const { createMiniMaxProvider } = await importRequired(
+    'apps/api/src/server/ai/minimax-provider.mjs',
+    ['createMiniMaxProvider'],
+    'MiniMax provider',
+  );
+
+  const transportCalls = [];
+  const provider = createMiniMaxProvider({
+    apiKey: 'minimax-test-key-cost-budget-canary',
+    baseUrl: 'https://api.minimax.io/v1',
+    model: 'MiniMax-M3',
+    budget: { maxLiveCalls: 1, maxEstimatedCostUsd: 0.000001 },
+    transport: async (request) => {
+      transportCalls.push(request);
+      throw new Error('transport must not be invoked when estimated cost budget is exceeded');
+    },
+  });
+
+  await assert.rejects(
+    () => provider.answerQuestion({
+      documentId: 'doc-cost-budget',
+      userId: 'user-1',
+      question: 'Summarize the document.',
+      prompt: { id: fallbackPromptId, version: '2026-07-07.1' },
+      context: { strategy: 'fallback', retrievalBackend: 'lexical_fallback', chunks: [] },
+    }),
+    /estimated live-call cost|over[- ]?budget/i,
+    'estimated-cost budget must surface an explicit pre-transport budget error',
+  );
+  assert.deepEqual(transportCalls, [], 'estimated-cost budget gate must run before transport');
+});
+
 test('live-call budget consumes failed transport attempts before allowing another MiniMax request', async () => {
   const { createMiniMaxProvider } = await importRequired(
     'apps/api/src/server/ai/minimax-provider.mjs',

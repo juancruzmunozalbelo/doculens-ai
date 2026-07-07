@@ -241,9 +241,13 @@ async function runLiveMiniMaxIfRequired() {
     budget: { maxLiveCalls: 1, maxInputTokens: 2_000, maxOutputTokens: 400, maxContextTokens: 2_000, maxRetries: 0, concurrencyLimit: 1, maxEstimatedCostUsd: 0.1 },
     maxOutputTokens: 400,
   });
-  const result = await provider.analyzeDocument({
+  const result = await provider.answerQuestion({
     documentId: 'eval-live-minimax-demo',
     userId: 'eval-live-user',
+    question: 'Summarize the live eval sample.',
+    prompt: { id: 'doculens.chat', version: PROMPT_VERSION },
+    context: { strategy: 'rag', retrievalBackend: 'loopback', chunks: [] },
+    chunks: [],
     document: {
       id: 'eval-live-minimax-demo',
       title: 'DocuLens live MiniMax eval sample',

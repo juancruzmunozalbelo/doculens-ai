@@ -8,6 +8,9 @@ const DEFAULT_MODEL = 'MiniMax-M3';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 800;
 const DEFAULT_ANALYSIS_MAX_OUTPUT_TOKENS = 6000;
+const MINIMAX_M3_INPUT_USD_PER_MILLION_TOKENS = 0.30;
+const MINIMAX_M3_OUTPUT_USD_PER_MILLION_TOKENS = 1.20;
+
 const DEFAULT_MAX_OUTPUT_TOKENS = DEFAULT_ANALYSIS_MAX_OUTPUT_TOKENS;
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 
@@ -31,6 +34,12 @@ function estimateTokensForMessages(messages) {
   const characterCount = messages.reduce((total, message) => total + String(message.content ?? '').length + String(message.role ?? '').length, 0);
   return Math.ceil(characterCount / CHARS_PER_TOKEN_ESTIMATE);
 }
+function estimateLiveCallCostUsd({ estimatedInputTokens, requestedOutputTokens }) {
+  const inputCost = (estimatedInputTokens / 1_000_000) * MINIMAX_M3_INPUT_USD_PER_MILLION_TOKENS;
+  const outputCost = (requestedOutputTokens / 1_000_000) * MINIMAX_M3_OUTPUT_USD_PER_MILLION_TOKENS;
+  return inputCost + outputCost;
+}
+
 
 function normalizeBudget(budget = {}) {
   return {
@@ -48,7 +57,7 @@ function normalizeBudget(budget = {}) {
   };
 }
 
-function assertWithinBudget({ budget, estimatedInputTokens, requestedOutputTokens }) {
+function assertWithinBudget({ budget, estimatedInputTokens, requestedOutputTokens, estimatedRequestCostUsd }) {
   if (budget.usedLiveCalls >= budget.maxLiveCalls) {
     throw new Error('MiniMax live call budget exceeded before transport invocation');
   }
@@ -61,7 +70,7 @@ function assertWithinBudget({ budget, estimatedInputTokens, requestedOutputToken
   if (requestedOutputTokens > budget.maxOutputTokens) {
     throw new Error('MiniMax request is over-budget for output tokens before transport invocation');
   }
-  if (budget.estimatedCostUsd > budget.maxEstimatedCostUsd) {
+  if (budget.estimatedCostUsd + estimatedRequestCostUsd > budget.maxEstimatedCostUsd) {
     throw new Error('MiniMax request is over-budget for estimated live-call cost before transport invocation');
   }
   if (budget.timeoutMs <= 0 || budget.maxRetries < 0) {
@@ -609,7 +618,8 @@ export function createMiniMaxProvider({
 
   async function invoke({ prompt, messages, context, outputTokens = maxOutputTokens }) {
     const estimatedInputTokens = estimateTokensForMessages(messages);
-    assertWithinBudget({ budget: configuredBudget, estimatedInputTokens, requestedOutputTokens: outputTokens });
+    const estimatedRequestCostUsd = estimateLiveCallCostUsd({ estimatedInputTokens, requestedOutputTokens: outputTokens });
+    assertWithinBudget({ budget: configuredBudget, estimatedInputTokens, requestedOutputTokens: outputTokens, estimatedRequestCostUsd });
 
     const request = {
       provider: 'minimax',
@@ -636,9 +646,11 @@ export function createMiniMaxProvider({
         maxRetries: configuredBudget.maxRetries,
         concurrencyLimit: configuredBudget.concurrencyLimit,
         estimatedInputTokens,
+        estimatedRequestCostUsd,
       },
     };
 
+    configuredBudget.estimatedCostUsd += estimatedRequestCostUsd;
     configuredBudget.usedLiveCalls += 1;
     configuredBudget.activeCalls += 1;
     try {

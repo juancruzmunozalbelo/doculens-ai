@@ -540,6 +540,31 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       },
     },
     {
+      name: 'source-answerable capital question uses rag when retrieved evidence clears threshold',
+      input: {
+        question: 'What is the capital of Argentina in this source?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'chunk-capital', normalizedScore: 0.92 },
+        ],
+      },
+      expected: {
+        contextStrategy: 'rag',
+        fallbackReason: null,
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.92,
+          minScore: 0.92,
+          averageScore: 0.92,
+          returnedChunks: 1,
+          passingChunks: 1,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
       name: 'normal document question uses fallback when retrieval coverage is below threshold',
       input: {
         question: 'Which sections mention indemnity?',

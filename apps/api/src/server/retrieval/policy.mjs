@@ -47,15 +47,6 @@ export function decideRetrievalStrategy({
 } = {}) {
   const retrievalScoreSummary = buildScoreSummary({ retrievedChunks, relevanceThreshold });
 
-  if (isOutsideDocumentQuestion(question)) {
-    return {
-      contextStrategy: 'unsupported',
-      fallbackReason: null,
-      unsupportedReason: 'outside_document_scope',
-      retrievalBackend,
-      retrievalScoreSummary,
-    };
-  }
 
   if (isGlobalQuestion(question)) {
     return {
@@ -76,6 +67,17 @@ export function decideRetrievalStrategy({
       retrievalScoreSummary,
     };
   }
+
+  if (isOutsideDocumentQuestion(question)) {
+    return {
+      contextStrategy: 'unsupported',
+      fallbackReason: null,
+      unsupportedReason: 'outside_document_scope',
+      retrievalBackend,
+      retrievalScoreSummary,
+    };
+  }
+
 
   return {
     contextStrategy: 'fallback',
