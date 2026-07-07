@@ -262,6 +262,130 @@ test('RetrievalProvider does not expose backend rows outside the requested docum
   }
 });
 
+test('RetrievalProvider filters scope before applying top-k limits so cross-scope rows cannot suppress valid evidence', async (t) => {
+  const { createRetrievalProvider } = await importRequired(
+    'src/server/retrieval/provider.mjs',
+    ['createRetrievalProvider'],
+    'Retrieval provider scope-before-limit contract',
+  );
+
+  const request = {
+    documentId: 'doc-pricing',
+    userId: owner.id,
+    query: 'What is the current price in this agreement?',
+    topK: 1,
+  };
+  const validRow = {
+    id: 'row-current-price',
+    documentId: request.documentId,
+    userId: request.userId,
+    chunkId: 'chunk-current-price',
+    chunkIndex: 7,
+    headingPath: ['Pricing Addendum', 'Current Fees'],
+    content: "The agreement's current unit price is $12 per licensed seat for the renewal term.",
+    tokenEstimate: 13,
+    score: 0.64,
+  };
+  const outOfScopeRows = [
+    {
+      id: 'row-other-document-price',
+      documentId: 'doc-other',
+      userId: request.userId,
+      chunkId: 'chunk-other-document-price',
+      chunkIndex: 1,
+      headingPath: ['Other Agreement', 'Pricing'],
+      content: 'Another agreement lists a higher $99 unit price and must not displace in-scope evidence.',
+      tokenEstimate: 12,
+      score: 0.99,
+    },
+    {
+      id: 'row-other-owner-price',
+      documentId: request.documentId,
+      userId: '22222222-2222-4222-8222-222222222222',
+      chunkId: 'chunk-other-owner-price',
+      chunkIndex: 2,
+      headingPath: ['Pricing Addendum', 'Other Owner'],
+      content: 'Another owner has confidential current pricing that must not displace in-scope evidence.',
+      tokenEstimate: 11,
+      score: 0.98,
+    },
+  ];
+  const backendRows = [...outOfScopeRows, validRow];
+  const cases = [
+    {
+      name: 'preferred backend',
+      provider: createRetrievalProvider({
+        preferredBackend: 'hybrid',
+        relevanceThreshold: 0.5,
+        async preferredSearch({ documentId, userId, query, limit }) {
+          assert.equal(documentId, request.documentId, 'preferred search must preserve requested document scope');
+          assert.equal(userId, request.userId, 'preferred search must preserve requested owner scope');
+          assert.equal(query, request.query, 'preferred search must search the original user question');
+          assert.equal(limit, request.topK, 'preferred search must receive the requested top-k limit');
+          return backendRows;
+        },
+      }),
+      expectedBackend: 'hybrid',
+      expectedFallbackReason: null,
+    },
+    {
+      name: 'lexical fallback backend',
+      provider: createRetrievalProvider({
+        preferredBackend: 'lexical_fallback',
+        relevanceThreshold: 0.5,
+        async lexicalSearch({ documentId, userId, query, limit }) {
+          assert.equal(documentId, request.documentId, 'lexical search must preserve requested document scope');
+          assert.equal(userId, request.userId, 'lexical search must preserve requested owner scope');
+          assert.equal(query, request.query, 'lexical search must search the original user question');
+          assert.equal(limit, request.topK, 'lexical search must receive the requested top-k limit');
+          return backendRows;
+        },
+      }),
+      expectedBackend: 'lexical_fallback',
+      expectedFallbackReason: 'embedding_unavailable',
+    },
+  ];
+
+  for (const { name, provider, expectedBackend, expectedFallbackReason } of cases) {
+    await t.test(name, async () => {
+      const result = await provider.retrieve(request);
+
+      assert.equal(result.retrievalBackend, expectedBackend, `${name} must label the backend that returned evidence`);
+      assert.equal(
+        result.backendFallbackReason ?? null,
+        expectedFallbackReason,
+        `${name} must preserve the backend fallback reason`,
+      );
+      assert.deepEqual(
+        result.retrievedChunks.map(compactChunk),
+        [
+          {
+            chunkId: validRow.chunkId,
+            headingPath: validRow.headingPath,
+            contentExcerpt: validRow.content,
+            tokenEstimate: validRow.tokenEstimate,
+            normalizedScore: validRow.score,
+            retrievalBackend: expectedBackend,
+          },
+        ],
+        `${name} must filter rows to requested document and owner scope before applying top-k so valid evidence is not suppressed by higher-scoring cross-scope rows`,
+      );
+      assert.deepEqual(
+        result.scoreSummary,
+        {
+          maxScore: validRow.score,
+          minScore: validRow.score,
+          averageScore: validRow.score,
+          returnedChunks: 1,
+          passingChunks: 1,
+          relevanceThreshold: 0.5,
+        },
+        `${name} score summary must describe the returned in-scope evidence after scope filtering`,
+      );
+    });
+  }
+});
+
 test('RetrievalProvider uses lexical retrieval only as an explicit lexical_fallback when vector or embedding retrieval is unavailable', async () => {
   const { createRetrievalProvider } = await importRequired(
     'src/server/retrieval/provider.mjs',
@@ -323,7 +447,7 @@ test('RetrievalProvider uses lexical retrieval only as an explicit lexical_fallb
   );
 });
 
-test('deterministic coverage policy returns rag, fallback, or unsupported with auditable low-coverage and global-question reasons', async () => {
+test('deterministic coverage policy returns rag, fallback, or unsupported with auditable low-coverage and global-question reasons', async (t) => {
   const { decideRetrievalStrategy } = await importRequired(
     'src/server/retrieval/policy.mjs',
     ['decideRetrievalStrategy'],
@@ -377,6 +501,32 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
           maxScore: 0.91,
           minScore: 0.72,
           averageScore: 0.815,
+          returnedChunks: 2,
+          passingChunks: 2,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'in-document current-price question uses rag when retrieved evidence clears threshold',
+      input: {
+        question: 'What is the current price in this agreement?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'chunk-current-price', normalizedScore: 0.93 },
+          { chunkId: 'chunk-pricing-addendum', normalizedScore: 0.71 },
+        ],
+      },
+      expected: {
+        contextStrategy: 'rag',
+        fallbackReason: null,
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.93,
+          minScore: 0.71,
+          averageScore: 0.82,
           returnedChunks: 2,
           passingChunks: 2,
           relevanceThreshold: 0.55,
@@ -458,10 +608,35 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
         },
       },
     },
+    {
+      name: 'outside-document current-share-price question is unsupported instead of silently using full-document fallback',
+      input: {
+        question: 'What is the current share price of Contoso today?',
+        retrievalBackend: 'lexical_fallback',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [],
+      },
+      expected: {
+        contextStrategy: 'unsupported',
+        fallbackReason: null,
+        unsupportedReason: 'outside_document_scope',
+        retrievalBackend: 'lexical_fallback',
+        retrievalScoreSummary: {
+          maxScore: null,
+          minScore: null,
+          averageScore: null,
+          returnedChunks: 0,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
   ];
 
   for (const { name, input, expected } of cases) {
-    assert.deepEqual(decideRetrievalStrategy(input), expected, name);
+    await t.test(name, () => {
+      assert.deepEqual(decideRetrievalStrategy(input), expected);
+    });
   }
 });
 

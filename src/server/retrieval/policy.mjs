@@ -15,7 +15,7 @@ const OUTSIDE_DOCUMENT_PATTERNS = [
   /\bnews\b/i,
   /\bmarket\s+cap\b/i,
   /\breal[-\s]?time\b/i,
-  /\b(?:current|today|latest)\b.*\b(?:stock|share|market|weather|news|price)\b/i,
+  /\b(?:current|today|latest)\b.*\b(?:stock|share|market|weather|news)\b/i,
 ];
 
 function isGlobalQuestion(question) {

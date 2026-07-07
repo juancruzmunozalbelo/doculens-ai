@@ -59,8 +59,8 @@ function rowBelongsToScope(row, { documentId, userId }) {
 }
 
 
-function rowsToResult({ rows, backend, backendFallbackReason, relevanceThreshold, documentId, userId }) {
-  const scopedRows = rows.filter((row) => rowBelongsToScope(row, { documentId, userId }));
+function rowsToResult({ rows, backend, backendFallbackReason, relevanceThreshold, documentId, userId, limit }) {
+  const scopedRows = rows.filter((row) => rowBelongsToScope(row, { documentId, userId })).slice(0, limit);
   const retrievedChunks = scopedRows.map((row) => citationReadyChunk(row, { backend, backendFallbackReason }));
   return {
     retrievalBackend: backend,
@@ -122,24 +122,26 @@ export function createRetrievalProvider({
       }
       const rows = await configuredLexicalSearch({ documentId, userId, query, limit });
       return rowsToResult({
-        rows: [...rows].sort(sortByScoreThenIndex).slice(0, limit),
+        rows: [...rows].sort(sortByScoreThenIndex),
         backend: LEXICAL_FALLBACK_BACKEND,
         backendFallbackReason: 'embedding_unavailable',
         relevanceThreshold,
         documentId,
         userId,
+        limit,
       });
     }
 
     try {
       const rows = await runPreferredSearch({ preferredSearch, documentId, userId, query, limit });
       return rowsToResult({
-        rows: rows.slice(0, limit),
+        rows,
         backend: configuredPreferredBackend,
         backendFallbackReason: null,
         relevanceThreshold,
         documentId,
         userId,
+        limit,
       });
     } catch (error) {
       const backendFallbackReason = retrievalUnavailableReason(error);
@@ -155,12 +157,13 @@ export function createRetrievalProvider({
 
       const rows = await configuredLexicalSearch({ documentId, userId, query, limit });
       return rowsToResult({
-        rows: [...rows].sort(sortByScoreThenIndex).slice(0, limit),
+        rows: [...rows].sort(sortByScoreThenIndex),
         backend: LEXICAL_FALLBACK_BACKEND,
         backendFallbackReason,
         relevanceThreshold,
         documentId,
         userId,
+        limit,
       });
     }
   }
