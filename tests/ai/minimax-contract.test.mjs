@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const minimaxAnalysisWrapperFixture = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/minimax/analysis-wrapper-response.json'), 'utf8'));
+const minimaxChatWrapperFixture = JSON.parse(readFileSync(path.join(repoRoot, 'tests/fixtures/minimax/chat-wrapper-response.json'), 'utf8'));
 const analysisPromptId = 'doculens.analysis';
 const chatPromptId = 'doculens.chat';
 const fallbackPromptId = 'doculens.fallback';
@@ -114,10 +117,9 @@ test('MiniMaxProvider satisfies the AIProvider contract and returns auditable pr
       contextStrategy: 'rag',
       retrievalBackend: 'hybrid',
       fallbackReason: null,
-      providerResponseId: 'minimax-response-1',
       tokenUsage: { input: 121, output: 29, total: 150 },
     },
-    'AI responses must persist provider, model, prompt, context, provider response, and token accounting metadata',
+    'AI responses must persist safe provider, model, prompt, context, and token accounting metadata without raw provider response IDs',
   );
 });
 
@@ -154,6 +156,17 @@ test('MiniMaxProvider normalizes structured analysis from top-level JSON, fenced
     {
       name: 'nested answer object',
       content: JSON.stringify({ answer: canonicalAnalysis, provider_response_id: 'raw-provider-response-id' }),
+      expected: canonicalAnalysis,
+    },
+    {
+      name: 'summary object from provider',
+      content: JSON.stringify({
+        ...canonicalAnalysis,
+        summary: {
+          text: canonicalAnalysis.summary,
+          confidence: 'medium',
+        },
+      }),
       expected: canonicalAnalysis,
     },
     {
@@ -298,6 +311,93 @@ test('MiniMaxProvider normalizes chat answers from fenced JSON and nested answer
       );
     });
   }
+});
+
+test('MiniMaxProvider unwraps sanitized captured MiniMax analysis and chat wrappers into reviewer-facing contracts', async (t) => {
+  const { createMiniMaxProvider } = await importRequired(
+    'apps/api/src/server/ai/minimax-provider.mjs',
+    ['createMiniMaxProvider'],
+    'MiniMax provider',
+  );
+  const serializedFixtures = JSON.stringify({
+    analysis: minimaxAnalysisWrapperFixture,
+    chat: minimaxChatWrapperFixture,
+  });
+
+  assert.doesNotMatch(
+    serializedFixtures,
+    /\/Users\/|Traceback|MINIMAX_API_KEY|AWS_SECRET_ACCESS_KEY|raw[_\s-]*prompt|response[_\s-]*id|provider-response/i,
+    'captured MiniMax fixtures must stay sanitized: no local paths, secrets, raw prompts, response IDs, or provider response IDs',
+  );
+
+  await t.test('analysis content array text wrapper', async () => {
+    const provider = createMiniMaxProvider({
+      apiKey: 'minimax-test-key-wrapper-analysis-canary',
+      baseUrl: 'https://api.minimax.io/v1',
+      model: 'MiniMax-M3',
+      transport: async () => minimaxAnalysisWrapperFixture.providerResponse,
+    });
+
+    const result = await provider.analyzeDocument({
+      documentId: 'doc-assessment-analysis-wrapper',
+      userId: 'user-1',
+      document: {
+        id: 'doc-assessment-analysis-wrapper',
+        title: 'Full Stack AI Engineer Assessment',
+        text: 'Assessment text includes backend requirements, frontend requirements, and deliverables.',
+      },
+      prompt: { id: analysisPromptId, version: '2026-07-07.1' },
+      context: { strategy: 'full_document', thinkingMode: 'standard' },
+    });
+
+    assert.deepEqual(
+      result.analysis,
+      minimaxAnalysisWrapperFixture.expectedAnalysis,
+      'MiniMax analysis wrappers must recursively unwrap JSON nested inside content/text/message/answer fields instead of falling back',
+    );
+    assert.ok(result.analysis.requirements.length >= 3, 'captured analysis fixture must preserve assessment requirements');
+    assert.ok(result.analysis.deliverables.length >= 1, 'captured analysis fixture must preserve assessment deliverables');
+    assert.doesNotMatch(
+      JSON.stringify(result.analysis),
+      /```|\[object Object\]|could not convert|raw[_\s-]*provider|provider[_\s-]*payload|response[_\s-]*id|\/Users\//i,
+      'unwrapped analysis display fields must not expose fences, fallback-only copy, raw provider wrappers, IDs, or local paths',
+    );
+  });
+
+  await t.test('chat content array fenced JSON wrapper', async () => {
+    const provider = createMiniMaxProvider({
+      apiKey: 'minimax-test-key-wrapper-chat-canary',
+      baseUrl: 'https://api.minimax.io/v1',
+      model: 'MiniMax-M3',
+      transport: async () => minimaxChatWrapperFixture.providerResponse,
+    });
+
+    const result = await provider.answerQuestion({
+      documentId: 'doc-assessment-chat-wrapper',
+      userId: 'user-1',
+      question: 'What deliverables must the candidate provide?',
+      prompt: { id: chatPromptId, version: '2026-07-07.1' },
+      context: {
+        strategy: 'rag',
+        retrievalBackend: 'hybrid',
+        fallbackReason: null,
+        chunks: [{
+          chunkId: 'assessment-deliverables',
+          headingPath: ['Full Stack AI Engineer Assessment', 'Deliverables'],
+          text: 'The candidate must deliver a Git repository with runnable local setup instructions and a README.',
+        }],
+      },
+    });
+
+    assert.equal(result.answer, minimaxChatWrapperFixture.expectedAnswer.text, 'captured chat wrapper must expose only reviewer-facing prose');
+    assert.deepEqual(result.citations, minimaxChatWrapperFixture.expectedAnswer.citations, 'captured chat wrapper must preserve safe citation fields');
+    assert.equal(result.uncertainty, minimaxChatWrapperFixture.expectedAnswer.uncertainty, 'captured chat wrapper must preserve uncertainty');
+    assert.doesNotMatch(
+      JSON.stringify({ answerText: result.answer, uncertainty: result.uncertainty, metadata: result.metadata }),
+      /```|\[object Object\]|raw[_\s-]*provider|provider[_\s-]*payload|response[_\s-]*id|\/Users\//i,
+      'unwrapped chat display fields must not leak fenced JSON, serialized objects, raw provider wrappers, IDs, or local paths',
+    );
+  });
 });
 
 test('prompt registry exposes versioned prompt IDs for analysis, chat, fallback, unsupported, and prompt-injection handling', async (t) => {
@@ -695,7 +795,6 @@ test('MiniMax live smoke command requires opt-in and API key, validates response
         ok: true,
         provider: 'minimax',
         model: 'MiniMax-M3',
-        responseId: 'smoke-response-1',
         tokenUsage: { input: 12, output: 4, total: 16 },
       },
       'smoke command must validate and return only the safe response shape callers need',

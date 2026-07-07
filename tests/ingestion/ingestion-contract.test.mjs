@@ -194,6 +194,64 @@ Either party may terminate after uncured material breach.`);
   );
 });
 
+test('plain-text PDF section heading inference preserves assessment labels without over-splitting unrelated prose', async () => {
+  const { chunkDocument } = await importRequired(
+    'apps/api/src/server/ingestion/chunking.mjs',
+    ['chunkDocument'],
+    'Plain-text PDF section heading inference',
+  );
+
+  const convertedAssessmentText = [
+    'Full Stack AI Engineer Assessment',
+    '',
+    'Overview and objective',
+    'This assessment asks the candidate to build an AI-powered full-stack application for reviewer document workflows.',
+    '',
+    'Backend requirements',
+    'The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval.',
+    '',
+    'Frontend requirements',
+    'The frontend must be implemented in React and provide source intake, review briefing, chat input, answer cards, and evidence inspection.',
+    '',
+    'Deliverables',
+    'The candidate must deliver a Git repository with runnable local setup instructions and a README explaining architecture and trade-offs.',
+  ].join('\n');
+
+  const inferredChunks = chunkDocument({ documentId: 'doc-plain-assessment-pdf', content: convertedAssessmentText, maxTokens: 28 });
+  const inferredHeadingPaths = inferredChunks.map((chunk) => chunk.headingPath.join(' > '));
+  for (const expectedHeadingPath of [
+    'Full Stack AI Engineer Assessment > Overview and objective',
+    'Full Stack AI Engineer Assessment > Backend requirements',
+    'Full Stack AI Engineer Assessment > Frontend requirements',
+    'Full Stack AI Engineer Assessment > Deliverables',
+  ]) {
+    assert.ok(inferredHeadingPaths.includes(expectedHeadingPath), `converted PDF text must infer heading path ${expectedHeadingPath}`);
+  }
+  assert.ok(
+    inferredChunks.some((chunk) => /Git repository with runnable local setup instructions/i.test(chunk.content)),
+    'inferred heading chunks must retain deliverables content for retrieval and reviewer answers',
+  );
+  assert.equal(
+    inferredChunks.every((chunk) => JSON.stringify(chunk.headingPath) === JSON.stringify(['Untitled'])),
+    false,
+    'converted assessment text with visible labels must not collapse into all-Untitled chunks',
+  );
+
+  const unrelatedPlainText = [
+    'Acme Beta weekly notes',
+    '',
+    'The deliverables are still being discussed by the team and are not a heading in this prose paragraph.',
+    '',
+    'This line mentions Backend requirements as a phrase, but it is embedded in a sentence rather than a standalone section label.',
+  ].join('\n');
+  const unrelatedChunks = chunkDocument({ documentId: 'doc-unrelated-plain-text', content: unrelatedPlainText, maxTokens: 24 });
+  assert.deepEqual(
+    [...new Set(unrelatedChunks.map((chunk) => chunk.headingPath.join(' > ')))],
+    ['Untitled'],
+    'heading inference must remain conservative for unrelated plain text that only mentions requirement words in prose',
+  );
+});
+
 test('assessment extracted-text fixture normalizes and chunks into the committed golden-path structure', async () => {
   const { normalizeDocumentText } = await importRequired(
     'apps/api/src/server/ingestion/normalization.mjs',

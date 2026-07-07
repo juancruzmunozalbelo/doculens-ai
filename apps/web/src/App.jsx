@@ -4,6 +4,7 @@ const TEST_IDS = Object.freeze({
   email: 'auth.email-input',
   password: 'auth.password-input',
   loginSubmit: 'auth.login-submit',
+  logout: 'auth.logout',
   documentTitle: 'document.title-input',
   documentContent: 'document.content-input',
   documentSubmit: 'document.submit',
@@ -425,12 +426,40 @@ function formatAnalysisItem(item) {
   return sanitizeDisplayText(item);
 }
 
+function stripDuplicateSummaryLabel(value) {
+  return String(value ?? '')
+    .replace(/^summary\s+summary\s*[:—-]?\s*/i, '')
+    .replace(/^summary\s*[:—-]\s*/i, '')
+    .trim();
+}
+
 function safeBriefingSummary(value) {
   const text = sanitizeDisplayText(value, 'Generate the briefing to summarize this source.');
-  if (/provider returned|structured json|raw json|diagnostic|stack trace/i.test(text)) {
+  const reviewerText = stripDuplicateSummaryLabel(text) || text;
+  if (/provider returned|structured json|raw json|diagnostic|stack trace|could not convert.*structured briefing|failed.*briefing conversion/i.test(text)) {
     return 'The briefing needs another pass. Retry analysis to rebuild a reviewer-ready summary for this source.';
   }
-  return text;
+  return reviewerText;
+}
+
+function hasAnalysisItems(items) {
+  return asArray(items).some((item) => sanitizeDisplayText(formatAnalysisItem(item), '').trim());
+}
+
+function isFallbackOnlyBriefing(analysis) {
+  if (!analysis) return false;
+  const requirements = asArray(analysis?.requirements).length > 0 ? analysis.requirements : analysis?.obligations;
+  const hasStructuredContent = [
+    analysis.sections,
+    analysis.entities,
+    requirements,
+    analysis.deliverables,
+    analysis.risks,
+    analysis.uncertainties,
+    analysis.recommendedQuestions,
+  ].some(hasAnalysisItems);
+  const summary = sanitizeDisplayText(analysis.summary, '');
+  return !hasStructuredContent && /could not convert.*structured briefing|failed.*briefing conversion|fallback-only|unable to produce.*briefing/i.test(summary);
 }
 
 function metadataValue(metadata, keys, fallback = 'Not available') {
@@ -601,6 +630,11 @@ function AppStyles() {
       button:disabled, input:disabled, textarea:disabled { cursor: not-allowed; opacity: 0.68; }
       .workspace-grid { display: grid; grid-template-columns: minmax(220px, 0.62fr) minmax(280px, 0.9fr) minmax(360px, 1.35fr); gap: 1rem; align-items: start; }
       .intake-grid { display: grid; grid-template-columns: minmax(260px, 0.75fr) minmax(320px, 1.25fr); gap: 1rem; align-items: start; }
+      .screen-shell, .review-workspace, .workspace-grid, .source-preview-column, [data-testid="${TEST_IDS.activeSource}"], [data-testid="${TEST_IDS.sourceCard}"] { min-width: 0; }
+      .source-title-text, .source-filename-text { display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
+      .source-filename-text { color: inherit; }
+      .source-preview-column { max-width: 100%; overflow: hidden; }
+      .source-preview-column [data-testid="${TEST_IDS.evidenceExcerpt}"] { overflow-wrap: anywhere; word-break: break-word; }
       .source-card-enter { animation: card-in 180ms ease-out; }
       .status-dot { width: 0.48rem; height: 0.48rem; border-radius: 999px; background: #2563eb; display: inline-block; animation: pulse 900ms ease-in-out infinite alternate; }
       .skeleton { position: relative; overflow: hidden; background: #e2e8f0; border-radius: 12px; min-height: 0.9rem; }
@@ -609,7 +643,7 @@ function AppStyles() {
       @keyframes pulse { from { transform: translateY(0); opacity: .45; } to { transform: translateY(-2px); opacity: 1; } }
       @keyframes card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
       @media (max-width: 1060px) { .workspace-grid { grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr); } .source-preview-column { grid-column: 1 / -1; } }
-      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: 1fr !important; } .app-header { align-items: flex-start !important; } }
+      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .app-header { align-items: flex-start !important; } .source-preview-column { max-height: min(60vh, 34rem); overflow: auto; } }
       @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; } }
       @media print {
         body { background: #ffffff !important; }
@@ -631,7 +665,7 @@ function AppStyles() {
   );
 }
 
-function AppShell({ auth, route, selectedDocument, onNavigateIntake, onNavigateWorkspace, children }) {
+function AppShell({ auth, route, selectedDocument, onNavigateIntake, onNavigateWorkspace, onLogout = () => {}, children }) {
   return (
     <main className="screen-shell" style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #eef6ff 0%, #f8fafc 42%, #ffffff 100%)', color: '#0f172a', fontFamily: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif' }}>
       <AppStyles />
@@ -646,6 +680,7 @@ function AppShell({ auth, route, selectedDocument, onNavigateIntake, onNavigateW
               <button data-testid={TEST_IDS.navIntake} type="button" onClick={onNavigateIntake} style={route.view === 'intake' ? buttonStyle : mutedButtonStyle}>Add source</button>
               <button data-testid={TEST_IDS.navWorkspace} type="button" onClick={onNavigateWorkspace} disabled={!selectedDocument} aria-current={route.view === 'review' ? 'page' : undefined} style={route.view === 'review' ? buttonStyle : mutedButtonStyle}>Review</button>
               <span style={{ ...chipStyle, background: '#f8fafc', color: '#475569' }}>{sanitizeDisplayText(auth.user?.displayName ?? auth.user?.email, 'Signed-in reviewer')}</span>
+              <button data-testid={TEST_IDS.logout} type="button" onClick={onLogout} style={mutedButtonStyle}>Log out</button>
             </nav>
           ) : null}
         </header>
@@ -786,10 +821,10 @@ function SourceRail({ documents, activeDocument, pendingSource, loading, onOpenD
           const disambiguator = needsDisambiguation(document, titleCounts) ? (filename || `${sourceTypeLabel(document)} · ${formatRelativeTime(sourceCreatedAt(document))}`) : '';
           return (
             <article key={document.id ?? document.title} data-testid={TEST_IDS.sourceCard} role="listitem" className="source-card-enter" aria-current={active ? 'true' : undefined} style={{ border: `1px solid ${active ? '#2563eb' : '#cbd5e1'}`, borderRadius: '16px', padding: '0.75rem', background: active ? '#eff6ff' : '#f8fafc' }}>
-              <button type="button" disabled={!document.id || document.pending || Boolean(loading)} onClick={() => document.id ? onOpenDocument(document) : undefined} style={{ ...mutedButtonStyle, width: '100%', textAlign: 'left', borderRadius: '12px', background: active ? '#dbeafe' : '#ffffff' }} aria-label={`Open source ${sourceTitle(document)}`}>
-                <strong>{sourceTitle(document)}</strong>
-                {showFilename ? <span><br />{filename}</span> : null}
-                {disambiguator && !showFilename ? <span><br />{disambiguator}</span> : null}
+              <button type="button" disabled={!document.id || document.pending || Boolean(loading)} onClick={() => document.id ? onOpenDocument(document) : undefined} style={{ ...mutedButtonStyle, width: '100%', textAlign: 'left', borderRadius: '12px', background: active ? '#dbeafe' : '#ffffff', minWidth: 0 }} aria-label={`Open source ${sourceTitle(document)}`}>
+                <strong className="source-title-text">{sourceTitle(document)}</strong>
+                {showFilename ? <span className="source-filename-text">{filename}</span> : null}
+                {disambiguator && !showFilename ? <span className="source-filename-text">{disambiguator}</span> : null}
                 <br />
                 <span data-testid={TEST_IDS.sourceStatus}>{sourceMetadataLine(document)}</span>
               </button>
@@ -813,8 +848,8 @@ function ActiveSourceCard({ document }) {
   return (
     <section data-testid={TEST_IDS.activeSource} style={{ ...panelStyle, background: '#0f172a', color: '#ffffff' }}>
       <p style={{ ...chipStyle, background: '#1e293b', color: '#bfdbfe' }}>Active source</p>
-      <h2 style={{ marginBlock: '0.3rem', fontSize: '1.45rem' }}>{sourceTitle(document)}</h2>
-      {filename ? <p style={{ color: '#dbeafe', marginBlock: '0.25rem' }}>{filename}</p> : null}
+      <h2 className="source-title-text" style={{ marginBlock: '0.3rem', fontSize: '1.45rem' }}>{sourceTitle(document)}</h2>
+      {filename ? <p className="source-filename-text" style={{ color: '#dbeafe', marginBlock: '0.25rem' }}>{filename}</p> : null}
       <p><span data-testid={TEST_IDS.sourceStatus} style={{ ...chipStyle, background: '#dcfce7', color: '#166534' }}>{documentStatusLabel(document)}</span><span style={{ ...chipStyle, background: '#e0f2fe', color: '#075985' }}>{sourceTypeLabel(document)}</span></p>
       <p style={{ color: '#cbd5e1', marginBlockEnd: 0 }}>{sourceMetadataLine(document)}</p>
     </section>
@@ -833,12 +868,12 @@ function SourcePreview({ document, activeEvidence }) {
   return (
     <section data-testid={TEST_IDS.evidencePanel} className="source-preview-column" style={panelStyle} aria-labelledby="source-preview-heading">
       <h2 id="source-preview-heading">Source preview</h2>
-      <p data-testid={TEST_IDS.evidenceSource}><strong>Source:</strong> {sourceTitle(document)}</p>
+      <p data-testid={TEST_IDS.evidenceSource} style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>Source:</strong> {sourceTitle(document)}</p>
       <p data-testid={TEST_IDS.evidenceSection}><strong>{activeEvidence ? 'Highlighted citation' : 'Preview'}:</strong> {sanitizeDisplayText(section, 'Source overview')}</p>
       <div ref={excerptRef} tabIndex={activeEvidence ? -1 : undefined} style={{ border: `2px solid ${activeEvidence ? '#f59e0b' : '#e2e8f0'}`, borderRadius: '14px', padding: '0.8rem', background: activeEvidence ? '#fffbeb' : '#f8fafc' }} aria-label={activeEvidence ? 'Highlighted source excerpt' : 'Source preview excerpt'}>
         <p data-testid={TEST_IDS.evidenceExcerpt} style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{sanitizeDisplayText(text, 'Source excerpt unavailable.')}</p>
       </div>
-      <p style={{ color: '#64748b' }}>Citation controls highlight source excerpts here. Answer cards separately list the evidence used for that answer.</p>
+      <p style={{ color: '#64748b' }}>{activeEvidence ? 'The highlighted excerpt is shown here for review.' : 'Ask a question or select evidence to highlight source text here.'}</p>
     </section>
   );
 }
@@ -857,7 +892,8 @@ function AnalysisCard({ title, items }) {
 function ReviewBriefing({ analysis, loading, onAnalyze }) {
   const busy = Boolean(loading);
   const requirements = asArray(analysis?.requirements).length > 0 ? analysis.requirements : analysis?.obligations;
-  const cards = analysis ? [
+  const recovery = isFallbackOnlyBriefing(analysis);
+  const cards = analysis && !recovery ? [
     ['Assessment parts', analysis.sections],
     ['Key entities', analysis.entities],
     ['Requirements', requirements],
@@ -876,7 +912,13 @@ function ReviewBriefing({ analysis, loading, onAnalyze }) {
         <button data-testid={TEST_IDS.documentAnalyze} type="button" onClick={onAnalyze} disabled={busy} style={secondaryButtonStyle}>{busy ? 'Building briefing…' : analysis ? 'Regenerate briefing' : 'Generate briefing'}</button>
       </div>
       {busy ? <OperationStatus loading={loading} /> : null}
-      {analysis ? (
+      {analysis && recovery ? (
+        <article style={{ border: '1px solid #fed7aa', borderRadius: '14px', padding: '0.9rem', background: '#fff7ed' }}>
+          <h3 style={{ marginTop: 0 }}>Briefing needs another pass</h3>
+          <p data-testid={TEST_IDS.analysisSummary}>{safeBriefingSummary(analysis.summary)}</p>
+          <p style={{ marginBlockEnd: 0 }}>No structured sections were recovered for this source yet. Retry the briefing, or ask a source overview question while the source preview remains available.</p>
+        </article>
+      ) : analysis ? (
         <div style={{ display: 'grid', gap: '0.85rem' }}>
           <article style={{ borderLeft: '4px solid #2563eb', paddingLeft: '0.85rem' }}>
             <h3>Summary</h3>
@@ -942,6 +984,11 @@ function AnswerCard({ entry, ordinal, onSelectQuestion, onSelectEvidence }) {
   const presentation = answerPresentation(entry.answer, entry.retrievedChunks);
   const evidence = evidenceFromAnswer(entry.answer, entry.retrievedChunks);
   const canShowCitations = presentation.kind === 'grounded' && evidence.length > 0;
+  const noEvidenceMessage = presentation.kind === 'full_document_overview'
+    ? 'This overview uses the full selected source, not sentence-by-sentence citations.'
+    : presentation.kind === 'unsupported'
+      ? 'No answer-specific evidence was used because the question is outside this source.'
+      : 'No answer-specific evidence was used. Refine the question or ask for a source overview.';
   return (
     <article data-testid={TEST_IDS.answerCard} className="source-card-enter" style={{ border: `1px solid ${presentation.color}`, background: presentation.tone, borderRadius: '16px', padding: '1rem' }}>
       <p style={{ ...chipStyle, background: '#ffffff', color: presentation.color }}>{presentation.badge}</p>
@@ -949,16 +996,18 @@ function AnswerCard({ entry, ordinal, onSelectQuestion, onSelectEvidence }) {
       <p style={{ color: presentation.color, fontWeight: 800 }}>{presentation.title}</p>
       <p>{presentation.lead}</p>
       <p data-testid={presentation.testId} style={{ fontSize: '1.03rem' }}>{presentation.answerText}{canShowCitations ? ' ' : ''}{canShowCitations ? evidence.map((item) => <button key={item.key} data-testid={TEST_IDS.inlineCitation} type="button" onClick={() => onSelectEvidence(item)} style={{ ...mutedButtonStyle, padding: '0.2rem 0.45rem', marginInlineStart: '0.25rem' }} aria-label={`Show source excerpt for citation ${item.marker}`}>[{item.marker}]</button>) : null}</p>
-      <section data-testid={TEST_IDS.chatCitations} aria-label="Citation controls" style={{ marginBlockStart: '0.75rem' }}>
-        <h4>Citation controls</h4>
-        {canShowCitations ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>{evidence.map((item) => <button key={`${item.key}-chip`} data-testid={TEST_IDS.evidenceChip} type="button" onClick={() => onSelectEvidence(item)} style={mutedButtonStyle}>Citation {item.marker}: {item.label}</button>)}</div>
-        ) : <p>{presentation.kind === 'full_document_overview' ? 'This overview uses the full selected source, not precise citation controls.' : presentation.kind === 'unsupported' ? 'Ask an in-source question to see citations.' : 'Refine the question to request citation-backed evidence.'}</p>}
-      </section>
-      <section data-testid={TEST_IDS.chatRetrievedChunks} aria-label="Evidence used" style={{ marginBlockStart: '0.75rem' }}>
-        <h4>Evidence used</h4>
-        {canShowCitations ? <ul>{evidence.map((item) => <li key={`${item.key}-excerpt`}><strong>{item.label}:</strong> {item.excerpt}</li>)}</ul> : <p>No answer-specific evidence was used for this answer.</p>}
-      </section>
+      {canShowCitations ? (
+        <>
+          <section data-testid={TEST_IDS.chatCitations} aria-label="Citation controls" style={{ marginBlockStart: '0.75rem' }}>
+            <h4>Citation controls</h4>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>{evidence.map((item) => <button key={`${item.key}-chip`} data-testid={TEST_IDS.evidenceChip} type="button" onClick={() => onSelectEvidence(item)} style={mutedButtonStyle}>Citation {item.marker}: {item.label}</button>)}</div>
+          </section>
+          <section data-testid={TEST_IDS.chatRetrievedChunks} aria-label="Evidence used" style={{ marginBlockStart: '0.75rem' }}>
+            <h4>Evidence used</h4>
+            <ul>{evidence.map((item) => <li key={`${item.key}-excerpt`}><strong>{item.label}:</strong> {item.excerpt}</li>)}</ul>
+          </section>
+        </>
+      ) : <p style={{ marginBlockStart: '0.75rem', marginBlockEnd: 0 }}>{noEvidenceMessage}</p>}
       {presentation.kind === 'insufficient' || presentation.kind === 'unsupported' || presentation.kind === 'error' ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBlockStart: '0.75rem' }}>
           <button type="button" onClick={() => onSelectQuestion('What is this document about?')} style={secondaryButtonStyle}>Ask overview</button>
@@ -1029,10 +1078,10 @@ function PrintReviewOutput({ document, analysis, answerHistory, activeEvidence, 
   );
 }
 
-function ReviewWorkspace({ auth, route, documents, document, analysis, latestAnswer, answerHistory, question, loading, error, activeEvidence, onNavigateIntake, onAnalyze, onQuestionChange, onQuestionSubmit, onRetryQuestion, onSelectQuestion, onSelectEvidence, onOpenDocument, onRenameDocument, onDeleteDocument }) {
+function ReviewWorkspace({ auth, route, documents, document, analysis, latestAnswer, answerHistory, question, loading, error, activeEvidence, onNavigateIntake, onLogout, onAnalyze, onQuestionChange, onQuestionSubmit, onRetryQuestion, onSelectQuestion, onSelectEvidence, onOpenDocument, onRenameDocument, onDeleteDocument }) {
   if (!document) {
     return (
-      <AppShell auth={auth} route={route} selectedDocument={null} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={onNavigateIntake}>
+      <AppShell auth={auth} route={route} selectedDocument={null} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={onNavigateIntake} onLogout={onLogout}>
         <OperationStatus error="Choose a source to open the review workspace." actions={<button type="button" onClick={onNavigateIntake} style={buttonStyle}>Go to Add source</button>} />
       </AppShell>
     );
@@ -1042,7 +1091,7 @@ function ReviewWorkspace({ auth, route, documents, document, analysis, latestAns
   const chatLoading = loading && /search|answer|evidence/i.test(loading) ? loading : '';
   const pageLoading = chatLoading ? '' : loading;
   return (
-    <AppShell auth={auth} route={route} selectedDocument={document} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={() => {}}>
+    <AppShell auth={auth} route={route} selectedDocument={document} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={() => {}} onLogout={onLogout}>
       <section data-testid={TEST_IDS.workspaceRoot} className="review-workspace" style={{ display: 'grid', gap: '1rem' }}>
         <PrintReviewOutput document={document} analysis={analysis} answerHistory={answerHistory} activeEvidence={activeEvidence} latestAnswer={latestAnswer} />
         <OperationStatus loading={pageLoading} error={error && !question.trim() ? error : ''} />
@@ -1063,9 +1112,9 @@ function ReviewWorkspace({ auth, route, documents, document, analysis, latestAns
   );
 }
 
-function IntakeView({ auth, route, loading, error, empty, documents, selectedDocument, pendingSource, sourceMethod, documentTitle, documentContent, selectedPdf, pdfTitle, pdfStatus, pdfError, onNavigateIntake, onNavigateWorkspace, onSourceMethodChange, onStartSample, onPasteSubmit, onDocumentTitleChange, onDocumentContentChange, onPdfFileChange, onPdfTitleChange, onPdfSubmit, onOpenDocument, onRenameDocument, onDeleteDocument, onPasteTextFallback }) {
+function IntakeView({ auth, route, loading, error, empty, documents, selectedDocument, pendingSource, sourceMethod, documentTitle, documentContent, selectedPdf, pdfTitle, pdfStatus, pdfError, onNavigateIntake, onNavigateWorkspace, onLogout, onSourceMethodChange, onStartSample, onPasteSubmit, onDocumentTitleChange, onDocumentContentChange, onPdfFileChange, onPdfTitleChange, onPdfSubmit, onOpenDocument, onRenameDocument, onDeleteDocument, onPasteTextFallback }) {
   return (
-    <AppShell auth={auth} route={route} selectedDocument={selectedDocument} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={onNavigateWorkspace}>
+    <AppShell auth={auth} route={route} selectedDocument={selectedDocument} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={onNavigateWorkspace} onLogout={onLogout}>
       <OperationStatus loading={loading && !pdfStatus ? loading : ''} error={error} empty={empty} />
       <div className="intake-grid">
         <div style={{ display: 'grid', gap: '1rem' }}>
@@ -1181,6 +1230,23 @@ export function App() {
     setAnswerHistory([]);
     setActiveEvidence(null);
     setQuestion('');
+  }
+
+  function handleLogout() {
+    setAuth(null);
+    setEmail('');
+    setPassword('');
+    setDocuments([]);
+    setSelectedDocument(null);
+    setPendingSource(null);
+    setSelectedPdf(null);
+    setPdfTitle('');
+    setPdfStatus('');
+    setPdfError('');
+    setLoading('');
+    setError('');
+    resetReviewState();
+    navigate({ view: 'intake', documentId: null });
   }
 
   async function loadDocuments(nextToken) {
@@ -1420,6 +1486,7 @@ export function App() {
         loading={loading}
         error={error}
         activeEvidence={activeEvidence}
+        onLogout={handleLogout}
         onNavigateIntake={navigateToIntake}
         onAnalyze={handleAnalyze}
         onQuestionChange={setQuestion}
@@ -1453,6 +1520,7 @@ export function App() {
       pdfError={pdfError}
       onNavigateIntake={navigateToIntake}
       onNavigateWorkspace={() => selectedDocument ? navigateToReview(selectedDocument) : undefined}
+      onLogout={handleLogout}
       onSourceMethodChange={setSourceMethod}
       onStartSample={handleStartSample}
       onPasteSubmit={handleDocumentSubmit}

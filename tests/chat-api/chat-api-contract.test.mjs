@@ -1023,6 +1023,79 @@ test('chat endpoint preserves useful broad assessment overview answers as full-d
   assert.deepEqual(response.body.answer.citations, [], 'full-document overview without precise citations must not fabricate chunk citations');
 });
 
+test('chat endpoint treats broad assessment requirements and deliverables questions as source-summary intents despite low retrieval coverage', async (t) => {
+  const cases = [
+    {
+      name: 'main requirements',
+      question: 'What are the main requirements in this source?',
+      evidence: 'The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval.',
+      providerText: 'The source asks for a REST API, an LLM provider boundary, JWT authentication and ownership checks, React reviewer UX, privacy-safe logging, reliability tests, and AWS deployment thinking.',
+      mustMention: ['REST API', 'LLM provider', 'JWT', 'React', 'AWS'],
+    },
+    {
+      name: 'deliverables',
+      question: 'What deliverables does this source request?',
+      evidence: 'The candidate must deliver a Git repository with runnable local setup instructions and a README.',
+      providerText: 'The source requests a Git repository, runnable local setup instructions, and a README explaining architecture, AI design, privacy decisions, reliability strategy, deployment approach, and trade-offs.',
+      mustMention: ['Git repository', 'runnable local setup instructions', 'README', 'deployment'],
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async (st) => {
+      const retrievalProvider = createRetrievalProviderFake({
+        chunks: [{
+          chunkId: `assessment-${currentCase.name.replace(/\s+/g, '-')}`,
+          documentId: assessmentDocument.id,
+          headingPath: ['Full Stack AI Engineer Assessment', currentCase.name],
+          content: currentCase.evidence,
+          contentExcerpt: currentCase.evidence,
+          chunkIndex: 0,
+          tokenEstimate: 18,
+          normalizedScore: 0.16,
+        }],
+        scoreSummary: { topScore: 0.16, averageScore: 0.16, passingChunks: 0, relevanceThreshold: 0.35 },
+      });
+      const aiProvider = createAiProviderFake({
+        chatResult: {
+          text: currentCase.providerText,
+          citations: [],
+          uncertainty: 'medium',
+          metadata: {
+            provider: 'minimax',
+            model: 'MiniMax-M3',
+            promptId: 'doculens.fallback',
+            promptVersion: '2026-07-07.1',
+            contextStrategy: 'fallback',
+          },
+        },
+      });
+      const { baseUrl } = await createServerHarness(st, {
+        documents: createDocumentServiceFake(assessmentDocument),
+        retrievalProvider,
+        aiProvider,
+        chatRepository: createChatRepositoryFake(),
+      });
+
+      const response = await requestJson(baseUrl, `/api/documents/${assessmentDocument.id}/chat`, {
+        method: 'POST',
+        body: { question: currentCase.question },
+      });
+
+      assert.equal(response.status, 201, `${currentCase.name} source-summary question should create an answer`);
+      assert.equal(aiProvider.answerCalls.length, 1, `${currentCase.name} source-summary question should invoke provider with source context`);
+      assert.equal(aiProvider.answerCalls[0].contextStrategy, 'fallback', `${currentCase.name} should use source-wide fallback context rather than citation-gated RAG`);
+      assert.equal(response.body.answer.displayState.kind, 'full_document_overview', `${currentCase.name} must not be downgraded to insufficient evidence when asking for source-level content`);
+      assert.equal(response.body.answer.metadata.fallbackReason, 'global_question', `${currentCase.name} must be classified as a source-summary/global question`);
+      assert.deepEqual(response.body.answer.citations, [], `${currentCase.name} source-summary answer must not fabricate precise citations`);
+      for (const term of currentCase.mustMention) {
+        assert.match(visibleAnswerSurface(response.body.answer), new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${currentCase.name} answer must mention ${term}`);
+      }
+      assertReviewerAnswerSurfaceSafe(response.body.answer, `${currentCase.name} source-summary answer`);
+    });
+  }
+});
+
 test('assessment golden questions return grounded, overview, low-coverage, and unsupported answer states without unsafe display leakage', async (t) => {
   const goldenQuestions = assessmentGoldenAssertions.chatGoldenQuestions;
   const groundedEntries = Object.entries(goldenQuestions).filter(([name]) => name !== 'overview');
@@ -1296,6 +1369,26 @@ test('chat endpoint normalizes JSON-shaped provider answer text and keeps raw pr
         '```',
       ].join('\n'),
       expectedText: 'The receiving party must return or destroy confidential materials within ten days of termination.',
+      forbiddenText: [
+        '```json',
+        'provider_payload',
+        'RAW_PROVIDER_PAYLOAD_API_CANARY',
+        'SYSTEM_POLICY_API_CANARY',
+        'HIDDEN_REASONING_API_CANARY',
+      ],
+    },
+    {
+      name: 'unterminated markdown JSON fence answer',
+      providerText: [
+        '```json',
+        JSON.stringify({
+          answer: 'The backend must expose authenticated REST APIs, AI analysis, chat, persistence, and source evidence review.',
+          provider_payload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+          policy: 'SYSTEM_POLICY_API_CANARY',
+          hidden_reasoning: 'HIDDEN_REASONING_API_CANARY',
+        }),
+      ].join('\n'),
+      expectedText: 'The backend must expose authenticated REST APIs, AI analysis, chat, persistence, and source evidence review.',
       forbiddenText: [
         '```json',
         'provider_payload',

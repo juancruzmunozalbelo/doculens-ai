@@ -119,6 +119,23 @@ function redactCredentialLikeText(value) {
   return { text, warnings: [...warnings] };
 }
 
+const DISPLAY_TEXT_KEYS = Object.freeze(['answer', 'summary', 'final', 'content', 'text']);
+
+function extractJsonStringField(text) {
+  const source = String(text ?? '');
+  for (const key of DISPLAY_TEXT_KEYS) {
+    const match = source.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, 'i'));
+    if (match?.[1]) {
+      try {
+        return JSON.parse(`"${match[1]}"`);
+      } catch {
+        return match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+      }
+    }
+  }
+  return null;
+}
+
 function displayTextFromJsonFence(text) {
   const trimmed = text.trim();
   const fence = trimmed.match(/^```(?:json|javascript|js)?\s*([\s\S]*?)\s*```$/i);
@@ -128,15 +145,18 @@ function displayTextFromJsonFence(text) {
   const inner = fence[1].trim();
   try {
     const parsed = JSON.parse(inner);
-    for (const key of ['answer', 'summary', 'final', 'content', 'text']) {
+    for (const key of DISPLAY_TEXT_KEYS) {
       if (typeof parsed?.[key] === 'string' && parsed[key].trim() !== '') {
         return parsed[key];
       }
     }
   } catch {
-    // Fall through and show only the unfenced prose.
+    const extracted = extractJsonStringField(inner);
+    if (extracted) {
+      return extracted;
+    }
   }
-  return inner;
+  return inner.startsWith('{') || inner.startsWith('[') ? '' : inner;
 }
 
 function displayTextFromJsonPayload(text) {
@@ -146,13 +166,13 @@ function displayTextFromJsonPayload(text) {
   }
   try {
     const parsed = JSON.parse(trimmed);
-    for (const key of ['answer', 'summary', 'final', 'content', 'text']) {
+    for (const key of DISPLAY_TEXT_KEYS) {
       if (typeof parsed?.[key] === 'string' && parsed[key].trim() !== '') {
         return parsed[key];
       }
     }
   } catch {
-    return null;
+    return extractJsonStringField(trimmed);
   }
   return null;
 }
@@ -163,6 +183,14 @@ function stripHiddenReasoning(value) {
   const fencedDisplay = fencedPayload ? displayTextFromJsonPayload(fencedPayload[1]) : null;
   if (fencedDisplay) {
     return fencedDisplay.trim();
+  }
+  const leadingFence = original.match(/^\s*```(?:json|javascript|js)?\s*([\s\S]*)$/i);
+  const leadingFenceDisplay = leadingFence ? displayTextFromJsonPayload(leadingFence[1]) : null;
+  if (leadingFenceDisplay) {
+    return leadingFenceDisplay.trim();
+  }
+  if (leadingFence) {
+    return '';
   }
   const rawJsonDisplay = displayTextFromJsonPayload(original);
   if (rawJsonDisplay) {
@@ -417,6 +445,9 @@ function quoteForCitation(citation, chunk, secrets) {
   return sanitizeDisplayText(quoteSource.slice(0, 240), secrets).text;
 }
 
+const PROVIDER_CONTAINER_KEYS = Object.freeze(['answer', 'message', 'content', 'text', 'output', 'output_text', 'result', 'data', 'response']);
+const ANSWER_TEXT_KEYS = Object.freeze(['text', 'answer', 'content', 'summary', 'final']);
+
 function parseStructuredProviderText(value) {
   const text = String(value ?? '').trim();
   if (text === '') {
@@ -434,63 +465,141 @@ function parseStructuredProviderText(value) {
   }
 }
 
-function structuredProviderPayload(providerResult = {}) {
-  if (isObject(providerResult.answer)) {
-    return providerResult.answer;
+function normalizedProviderPayloadValue(value, depth = 0) {
+  if (depth > 8 || value === null || value === undefined) {
+    return value;
   }
-  for (const key of ['text', 'content', 'answer']) {
-    if (typeof providerResult[key] === 'string') {
-      const parsed = parseStructuredProviderText(providerResult[key]);
-      if (isObject(parsed?.answer)) {
-        return parsed.answer;
-      }
-      if (isObject(parsed)) {
-        return parsed;
-      }
+  if (typeof value === 'string') {
+    const parsed = parseStructuredProviderText(value);
+    return parsed === null ? value : normalizedProviderPayloadValue(parsed, depth + 1);
+  }
+  if (Array.isArray(value)) {
+    const normalizedItems = value
+      .map((item) => normalizedProviderPayloadValue(item, depth + 1))
+      .filter((item) => {
+        if (typeof item === 'string') return item.trim() !== '';
+        if (Array.isArray(item)) return item.length > 0;
+        if (isObject(item)) return Object.keys(item).length > 0;
+        return item !== null && item !== undefined;
+      });
+    const structured = normalizedItems.find((item) => isObject(item) && ANSWER_TEXT_KEYS.some((key) => item[key] !== undefined));
+    return structured ?? (normalizedItems.every((item) => typeof item === 'string') ? normalizedItems.join('\n').trim() : normalizedItems);
+  }
+  if (!isObject(value)) {
+    return value;
+  }
+
+  const normalized = Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, normalizedProviderPayloadValue(item, depth + 1)]),
+  );
+  if (
+    ANSWER_TEXT_KEYS.some((key) => normalized[key] !== undefined)
+    || Array.isArray(normalized.citations)
+    || normalized.uncertainty !== undefined
+    || isObject(normalized.metadata)
+  ) {
+    return normalized;
+  }
+  for (const key of PROVIDER_CONTAINER_KEYS) {
+    const nested = normalized[key];
+    if (isObject(nested) || Array.isArray(nested) || (typeof nested === 'string' && nested.trim() !== '')) {
+      return normalizedProviderPayloadValue(nested, depth + 1);
     }
   }
-  return null;
+  return normalized;
+}
+
+function structuredProviderPayload(providerResult = {}) {
+  const normalized = normalizedProviderPayloadValue(providerResult);
+  return isObject(normalized) ? normalized : null;
+}
+
+function textFromStructuredPayload(payload) {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+  if (!isObject(payload)) {
+    return '';
+  }
+  if (isObject(payload.answer)) {
+    return textFromStructuredPayload(payload.answer);
+  }
+  for (const key of ANSWER_TEXT_KEYS) {
+    if (typeof payload[key] === 'string' && payload[key].trim() !== '') {
+      return payload[key];
+    }
+  }
+  for (const key of PROVIDER_CONTAINER_KEYS) {
+    const nested = textFromStructuredPayload(payload[key]);
+    if (nested) {
+      return nested;
+    }
+  }
+  return '';
 }
 
 function providerAnswerText(providerResult = {}) {
-  const structured = structuredProviderPayload(providerResult);
-  if (isObject(structured)) {
-    for (const key of ['text', 'answer', 'content', 'summary']) {
-      if (typeof structured[key] === 'string') {
-        return structured[key];
-      }
+  return textFromStructuredPayload(structuredProviderPayload(providerResult)) || '';
+}
+
+function citationsFromStructuredPayload(payload) {
+  if (!isObject(payload)) {
+    return [];
+  }
+  if (Array.isArray(payload.citations)) {
+    return payload.citations;
+  }
+  if (isObject(payload.answer)) {
+    const nestedAnswerCitations = citationsFromStructuredPayload(payload.answer);
+    if (nestedAnswerCitations.length > 0) {
+      return nestedAnswerCitations;
     }
   }
-  if (typeof providerResult.text === 'string') {
-    return providerResult.text;
+  for (const key of PROVIDER_CONTAINER_KEYS) {
+    const nested = citationsFromStructuredPayload(payload[key]);
+    if (nested.length > 0) {
+      return nested;
+    }
   }
-  if (typeof providerResult.content === 'string') {
-    return providerResult.content;
+  return [];
+}
+
+function uncertaintyFromStructuredPayload(payload) {
+  if (!isObject(payload)) {
+    return undefined;
   }
-  if (typeof providerResult.answer === 'string') {
-    return providerResult.answer;
+  if (payload.uncertainty !== undefined) {
+    return payload.uncertainty;
   }
-  return '';
+  if (isObject(payload.answer)) {
+    const nestedAnswerUncertainty = uncertaintyFromStructuredPayload(payload.answer);
+    if (nestedAnswerUncertainty !== undefined) {
+      return nestedAnswerUncertainty;
+    }
+  }
+  for (const key of PROVIDER_CONTAINER_KEYS) {
+    const nested = uncertaintyFromStructuredPayload(payload[key]);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+  return undefined;
 }
 
 function providerCitations(providerResult = {}) {
   if (Array.isArray(providerResult.citations)) {
     return providerResult.citations;
   }
-  const structured = structuredProviderPayload(providerResult);
-  if (isObject(structured) && Array.isArray(structured.citations)) {
-    return structured.citations;
-  }
-  return [];
+  return citationsFromStructuredPayload(structuredProviderPayload(providerResult));
 }
 
 function providerUncertainty(providerResult = {}, strategy) {
   if (providerResult.uncertainty !== undefined) {
     return providerResult.uncertainty;
   }
-  const structured = structuredProviderPayload(providerResult);
-  if (isObject(structured) && structured.uncertainty !== undefined) {
-    return structured.uncertainty;
+  const structuredUncertainty = uncertaintyFromStructuredPayload(structuredProviderPayload(providerResult));
+  if (structuredUncertainty !== undefined) {
+    return structuredUncertainty;
   }
   return strategy.contextStrategy === 'fallback' ? 'unknown' : null;
 }

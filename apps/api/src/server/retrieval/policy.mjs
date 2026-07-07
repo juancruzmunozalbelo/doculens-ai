@@ -13,6 +13,10 @@ const GLOBAL_QUESTION_PATTERNS = [
   /\b(?:tell|walk)\s+me\s+(?:about|through)\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
   /\b(?:main|key)\s+(?:points|ideas|themes|takeaways)\b/i,
   /\b(?:purpose|scope)\s+of\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
+  /\b(?:main|key|primary|core)\s+(?:requirements?|deliverables?|risks?|obligations?|expectations?)\b/i,
+  /\bwhat\s+(?:are|were)\s+(?:the\s+)?(?:main|key|primary|core)?\s*(?:requirements?|deliverables?|risks?|obligations?|expectations?)\s+(?:in|from|for|of)\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
+  /\bwhat\s+(?:deliverables?|requirements?|risks?|obligations?|expectations?)\s+does\s+(?:this|the)\s+(?:document|source|file|pdf)\s+(?:request|require|list|mention|describe|include)\b/i,
+  /\b(?:summarize|summarise|list|identify|extract)\s+(?:the\s+)?(?:requirements?|deliverables?|risks?|obligations?|expectations?)\s+(?:in|from|for|of)\s+(?:this|the)\s+(?:document|source|file|pdf)\b/i,
 ];
 
 const OUTSIDE_DOCUMENT_PATTERNS = [

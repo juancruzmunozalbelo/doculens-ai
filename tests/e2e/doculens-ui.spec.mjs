@@ -12,6 +12,7 @@ const TEST_IDS = Object.freeze({
   email: 'auth.email-input',
   password: 'auth.password-input',
   loginSubmit: 'auth.login-submit',
+  logout: 'auth.logout',
   documentTitle: 'document.title-input',
   documentContent: 'document.content-input',
   documentSubmit: 'document.submit',
@@ -132,6 +133,38 @@ const assessmentDocument = Object.freeze({
     mimeType: assessmentFixtureManifest.sourceMetadataExpectations.mimeType,
     sizeBytes: assessmentFixtureManifest.sourceMetadataExpectations.sizeBytes,
     sourceMethod: assessmentFixtureManifest.sourceMetadataExpectations.sourceMethod,
+    uploadedAt: '2026-07-07T12:00:00.000Z',
+  },
+});
+
+const fallbackBriefingDocument = Object.freeze({
+  id: 'doc-ui-fallback-briefing-001',
+  title: 'Recovered Provider Briefing',
+  status: 'ready',
+  sourceType: 'pasted-text',
+  content: [
+    '# Recovered Provider Briefing',
+    'This source has readable assessment requirements, but the first AI analysis response was fallback-only.',
+    'Reviewers should be able to retry analysis without seeing a normal empty structured briefing.',
+  ].join('\n'),
+});
+
+const longPdfBasename = 'Full_Stack_AI_Engineer_Assessment_With_Extraordinarily_Long_Client_Confidential_Addendum_And_Reviewer_Notes_2026_Final_Final.pdf';
+const longFilenameDocument = Object.freeze({
+  id: 'doc-ui-long-filename-001',
+  title: 'Full Stack AI Engineer Assessment With Extraordinarily Long Client Confidential Addendum And Reviewer Notes 2026 Final Final',
+  status: 'ready',
+  sourceType: 'pdf',
+  content: [
+    '# Full Stack AI Engineer Assessment With Extraordinarily Long Client Confidential Addendum And Reviewer Notes 2026 Final Final',
+    ...Array.from({ length: 28 }, (_, index) => `Section ${index + 1}: Backend, frontend, data privacy, reliability, deployment, and deliverable review requirements remain readable in the source preview without hiding source controls.`),
+  ].join('\n'),
+  metadata: {
+    originalBasename: longPdfBasename,
+    safeOriginalBasename: longPdfBasename,
+    mimeType: 'application/pdf',
+    sizeBytes: 7818,
+    sourceMethod: 'pdf',
     uploadedAt: '2026-07-07T12:00:00.000Z',
   },
 });
@@ -334,6 +367,21 @@ function assessmentAnalysisFor() {
   };
 }
 
+function fallbackOnlyAnalysisFor() {
+  return {
+    summary: 'Summary Summary DocuLens could not convert the AI response into a structured briefing.',
+    sections: [],
+    entities: [],
+    requirements: [],
+    obligations: [],
+    deliverables: [],
+    risks: [],
+    uncertainties: [],
+    recommendedQuestions: [],
+    metadata: { ...analysisMetadata, fallbackReason: 'provider_shape_unrecognized' },
+  };
+}
+
 function assessmentAnswerFor(question) {
   const entry = Object.values(assessmentGoldenAssertions.chatGoldenQuestions).find((assertion) => assertion.question === question);
   if (entry?.question === assessmentGoldenAssertions.chatGoldenQuestions.overview.question) {
@@ -471,7 +519,7 @@ async function installDocuLensApiFake(page, {
       if (delayAnalysisUntil) {
         await delayAnalysisUntil(route.request());
       }
-      await fulfillJson(route, 201, { analysis: document.id === assessmentDocumentId ? assessmentAnalysisFor() : analysisFor(document) });
+      await fulfillJson(route, 201, { analysis: document.id === assessmentDocumentId ? assessmentAnalysisFor() : document.id === fallbackBriefingDocument.id ? fallbackOnlyAnalysisFor() : analysisFor(document) });
     });
 
     await page.route(`**/api/documents/${documentId}/chat`, async (route) => {
@@ -503,6 +551,25 @@ async function installDocuLensApiFake(page, {
       if (/provider error/i.test(question)) {
         await fulfillJson(route, 503, {
           error: `Traceback ${localPathCanary} ${rawProviderPayloadCanary} MINIMAX_API_KEY=secret ${rawPolicyCanary}`,
+        });
+        return;
+      }
+
+      if (/insurance cap|specific unsupported detail/i.test(question)) {
+        await fulfillJson(route, 201, {
+          answer: {
+            text: 'I did not find enough cited evidence in this source to answer that exact insurance-cap question confidently.',
+            citations: [],
+            uncertainty: 'high',
+            state: 'insufficient_evidence',
+            displayState: { kind: 'insufficient_evidence', label: 'Needs stronger evidence', message: 'No answer-specific evidence supports this detail.' },
+            suggestedRefinements: [
+              'Ask for the source overview.',
+              'Ask which sections discuss risk or insurance obligations.',
+            ],
+            metadata: fallbackMetadata,
+          },
+          retrievedChunks: [],
         });
         return;
       }
@@ -654,6 +721,20 @@ async function askQuestion(page, question) {
   await byTestId(page, 'chatSubmit').click();
 }
 
+async function expectElementReceivesPointer(page, locator) {
+  await locator.scrollIntoViewIfNeeded();
+  await expect(locator).toBeVisible();
+  const receivesPointer = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const x = Math.min(window.innerWidth - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(window.innerHeight - 1, Math.max(0, rect.top + rect.height / 2));
+    const topElement = document.elementFromPoint(x, y);
+    return topElement === element || element.contains(topElement);
+  });
+  expect(receivesPointer).toBe(true);
+}
+
 test('source-first notebook creates a ready active source, offers briefing and starter questions before analysis, and keeps chat scoped to the source', async ({ page }) => {
   let releaseAnalysis;
   const analysisRequestSeen = new Promise((resolve) => {
@@ -769,6 +850,90 @@ test('full-document overview without citations renders a caveated overview and o
   await expect(unsupportedCard).not.toContainText(/generic error|Traceback|outside_document_scope|no_citations_for_unsupported_answer/i);
   await expectQuietPrimaryCopy(page);
   await expectNoUnsafeReviewerArtifacts(page);
+});
+
+test('briefing recovery renders fallback-only analysis as retryable state without duplicate summary labels', async ({ page }) => {
+  await installDocuLensApiFake(page, { documents: [fallbackBriefingDocument], documentDetails: [fallbackBriefingDocument] });
+  await signIn(page);
+
+  await byTestId(page, 'sourceCard').filter({ hasText: fallbackBriefingDocument.title }).first().click();
+  await byTestId(page, 'documentAnalyze').click();
+
+  const briefing = byTestId(page, 'reviewBriefing');
+  await expect(briefing).toContainText(/Briefing needs another pass/i);
+  await expect(byTestId(page, 'analysisSummary')).toContainText(/retry analysis|reviewer-ready summary/i);
+  await expect(briefing).toContainText(/Retry the briefing|source overview/i);
+  await expect(briefing).not.toContainText(/\bSummary\s+Summary\b/i);
+  await expect(briefing).not.toContainText(/DocuLens could not convert|structured briefing failure|provider_shape_unrecognized/i);
+  await expect(briefing).not.toContainText(/Requirements|Deliverables|Risks and trade-offs|Recommended questions/i);
+});
+
+test('insufficient-evidence answers stay compact and omit empty citation controls', async ({ page }) => {
+  await installDocuLensApiFake(page, { documents: [sampleDocument] });
+  await signIn(page);
+  await openSampleSource(page);
+
+  await askQuestion(page, 'What is the exact insurance cap in dollars?');
+
+  const answerCard = byTestId(page, 'answerCard').filter({ hasText: /insurance cap/i }).first();
+  await expect(answerCard).toContainText(/Not enough answer-specific evidence|Needs stronger evidence/i);
+  await expect(answerCard).toContainText(/No answer-specific evidence was used/i);
+  await expect(answerCard).toContainText(/Ask overview|Refine with source evidence/i);
+  await expect(answerCard.getByTestId(TEST_IDS.chatCitations)).toHaveCount(0);
+  await expect(answerCard.getByTestId(TEST_IDS.chatRetrievedChunks)).toHaveCount(0);
+  await expect(answerCard).not.toContainText(/Citation controls|Evidence used|retrieved chunk|fallback reason|0 citations|low_retrieval_coverage/i);
+  await expectQuietPrimaryCopy(page);
+  await expectNoUnsafeReviewerArtifacts(page);
+});
+
+test('narrow source workspace wraps long PDF filenames and keeps preview plus source controls accessible', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 760 });
+  await installDocuLensApiFake(page, { documents: [longFilenameDocument], documentDetails: [longFilenameDocument] });
+  await signIn(page);
+
+  const sourceCard = byTestId(page, 'sourceCard').filter({ hasText: /Extraordinarily Long Client Confidential/i }).first();
+  await expect(sourceCard).toBeVisible();
+  await expect(sourceCard).toContainText(/Full_Stack_AI_Engineer_Assessment_With_|Final_Final\.pdf/i);
+  await sourceCard.click();
+
+  await expect(byTestId(page, 'activeSource')).toContainText(/Extraordinarily Long Client Confidential/i);
+  await expect(byTestId(page, 'activeSource')).toContainText(/Full_Stack_AI_Engineer_Assessment_With_|Final_Final\.pdf/i);
+  await expect(byTestId(page, 'evidencePanel')).toBeVisible();
+  await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Backend, frontend, data privacy/i);
+
+  const layout = await page.evaluate(() => {
+    const root = document.documentElement;
+    const preview = document.querySelector('[data-testid="evidence.panel"]')?.getBoundingClientRect();
+    const active = document.querySelector('[data-testid="source.active"]')?.getBoundingClientRect();
+    const sourceRail = document.querySelector('[data-testid="source.management"]')?.getBoundingClientRect();
+    const previewNode = document.querySelector('[data-testid="evidence.panel"]');
+    return {
+      scrollWidth: root.scrollWidth,
+      clientWidth: root.clientWidth,
+      previewWidth: preview?.width ?? 0,
+      activeWidth: active?.width ?? 0,
+      sourceRailWidth: sourceRail?.width ?? 0,
+      previewClientHeight: previewNode?.clientHeight ?? 0,
+      previewScrollHeight: previewNode?.scrollHeight ?? 0,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 2);
+  expect(layout.previewWidth).toBeLessThanOrEqual(layout.clientWidth);
+  expect(layout.activeWidth).toBeLessThanOrEqual(layout.clientWidth);
+  expect(layout.sourceRailWidth).toBeLessThanOrEqual(layout.clientWidth);
+  expect(layout.previewClientHeight).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
+  expect(layout.previewScrollHeight).toBeGreaterThan(layout.previewClientHeight);
+
+  for (const button of [
+    sourceCard.getByRole('button', { name: /^Open$/ }),
+    sourceCard.getByRole('button', { name: /Rename source/i }),
+    sourceCard.getByRole('button', { name: /Delete source/i }),
+    byTestId(page, 'documentAnalyze'),
+  ]) {
+    await expect(button).toBeEnabled();
+    await expectElementReceivesPointer(page, button);
+  }
 });
 
 test('opening a recent source fetches document detail when the list response omits content', async ({ page }) => {
@@ -1041,6 +1206,35 @@ test('print media keeps the review summary, source, answers, citations, and evid
   }
   await expect(byTestId(page, 'printOutput')).not.toContainText(QUIET_PRIMARY_COPY_DENYLIST);
   await expect(byTestId(page, 'printOutput')).not.toContainText(/technical details|provider|prompt|token|raw metadata|retrieval score/i);
+});
+
+test('authenticated header logout clears the session and returns to sign-in', async ({ page }) => {
+  await installDocuLensApiFake(page, { documents: [sampleDocument] });
+
+  const authenticatedReviewRequestsAfterLogout = [];
+  let afterLogoutClick = false;
+  page.on('request', (request) => {
+    if (!afterLogoutClick) {
+      return;
+    }
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/api/documents') && request.headers().authorization) {
+      authenticatedReviewRequestsAfterLogout.push(`${request.method()} ${url.pathname}`);
+    }
+  });
+
+  await signIn(page);
+  await expect(page.getByText('Demo Reviewer')).toBeVisible();
+  await expect(byTestId(page, 'sourceCreate')).toBeVisible();
+  await expect(byTestId(page, 'logout')).toBeVisible();
+
+  afterLogoutClick = true;
+  await byTestId(page, 'logout').click();
+
+  await expectLoginControls(page);
+  await expect(byTestId(page, 'sourceCreate')).toBeHidden();
+  await expect(byTestId(page, 'workspaceRoot')).toBeHidden();
+  expect(authenticatedReviewRequestsAfterLogout).toEqual([]);
 });
 
 test('login failure renders the canonical error state without echoing credentials', async ({ page }) => {

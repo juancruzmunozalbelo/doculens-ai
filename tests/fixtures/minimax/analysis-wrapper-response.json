@@ -1,0 +1,90 @@
+{
+  "description": "Sanitized representative MiniMax analysis wrapper with canonical assessment JSON inside a content array text part.",
+  "expectedAnalysis": {
+    "summary": "The Full Stack AI Engineer Assessment asks the candidate to build an AI-powered full-stack document review app with backend APIs, retrieval-grounded AI, React UX, reliability evidence, deployment thinking, and clear deliverables.",
+    "sections": [
+      {
+        "title": "Backend requirements",
+        "summary": "Expose REST APIs for authentication, document creation, analysis, chat, retrieval, persistence, and JWT ownership checks.",
+        "sourceQuote": "The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval."
+      },
+      {
+        "title": "Frontend requirements",
+        "summary": "Build a React reviewer workspace with source intake, briefing, chat, answer cards, loading and error states, and readable AI output.",
+        "sourceQuote": "The frontend must be implemented in React and provide a user-friendly flow."
+      },
+      {
+        "title": "Deliverables",
+        "summary": "Provide a runnable Git repository and README covering architecture, AI design, data flow, privacy, reliability, deployment, and trade-offs.",
+        "sourceQuote": "The candidate must deliver a Git repository with runnable local setup instructions and a README."
+      }
+    ],
+    "entities": [
+      {
+        "name": "Full Stack AI Engineer Assessment",
+        "type": "assessment",
+        "description": "A sanitized assessment fixture for reviewer workflow validation."
+      }
+    ],
+    "requirements": [
+      {
+        "category": "Backend",
+        "text": "Expose REST API endpoints for authentication, document creation, analysis, chat, source retrieval, persistence, and JWT ownership checks.",
+        "sourceQuote": "The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval."
+      },
+      {
+        "category": "AI and retrieval",
+        "text": "Normalize model responses, combine document-level analysis with retrieval-grounded chat, cite supporting evidence, and fail safely for insufficient evidence.",
+        "sourceQuote": "The AI path must combine document-level analysis with retrieval-grounded chat."
+      },
+      {
+        "category": "Frontend",
+        "text": "Implement a React reviewer flow with source intake, review briefing, starter questions, chat input, answer cards, inspectable evidence, and resilient states.",
+        "sourceQuote": "The frontend must be implemented in React and provide a user-friendly flow."
+      }
+    ],
+    "obligations": [],
+    "deliverables": [
+      {
+        "text": "Submit a Git repository with runnable local setup instructions and a README explaining architecture, AI design, data flow, privacy decisions, reliability strategy, deployment approach, and trade-offs.",
+        "sourceQuote": "The candidate must deliver a Git repository with runnable local setup instructions and a README."
+      }
+    ],
+    "risks": [
+      {
+        "severity": "medium",
+        "text": "AI reliability, hallucination handling, privacy-safe logging, conversion failures, retrieval misses, provider failures, and network failures need explicit tests and safe recovery behavior.",
+        "sourceQuote": "The implementation should fail safely when conversion, retrieval, provider, or network operations fail."
+      }
+    ],
+    "uncertainties": [
+      "The fixture describes expectations but does not prescribe a specific database or cloud topology."
+    ],
+    "recommendedQuestions": [
+      "What backend requirements does the assessment specify?",
+      "What frontend UX requirements should be implemented?",
+      "What deliverables must the candidate provide?"
+    ]
+  },
+  "providerResponse": {
+    "model": "MiniMax-M3",
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "```json\n{\"data\":{\"output\":{\"message\":{\"answer\":{\"summary\":\"The Full Stack AI Engineer Assessment asks the candidate to build an AI-powered full-stack document review app with backend APIs, retrieval-grounded AI, React UX, reliability evidence, deployment thinking, and clear deliverables.\",\"sections\":[{\"title\":\"Backend requirements\",\"summary\":\"Expose REST APIs for authentication, document creation, analysis, chat, retrieval, persistence, and JWT ownership checks.\",\"sourceQuote\":\"The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval.\"},{\"title\":\"Frontend requirements\",\"summary\":\"Build a React reviewer workspace with source intake, briefing, chat, answer cards, loading and error states, and readable AI output.\",\"sourceQuote\":\"The frontend must be implemented in React and provide a user-friendly flow.\"},{\"title\":\"Deliverables\",\"summary\":\"Provide a runnable Git repository and README covering architecture, AI design, data flow, privacy, reliability, deployment, and trade-offs.\",\"sourceQuote\":\"The candidate must deliver a Git repository with runnable local setup instructions and a README.\"}],\"entities\":[{\"name\":\"Full Stack AI Engineer Assessment\",\"type\":\"assessment\",\"description\":\"A sanitized assessment fixture for reviewer workflow validation.\"}],\"requirements\":[{\"category\":\"Backend\",\"text\":\"Expose REST API endpoints for authentication, document creation, analysis, chat, source retrieval, persistence, and JWT ownership checks.\",\"sourceQuote\":\"The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval.\"},{\"category\":\"AI and retrieval\",\"text\":\"Normalize model responses, combine document-level analysis with retrieval-grounded chat, cite supporting evidence, and fail safely for insufficient evidence.\",\"sourceQuote\":\"The AI path must combine document-level analysis with retrieval-grounded chat.\"},{\"category\":\"Frontend\",\"text\":\"Implement a React reviewer flow with source intake, review briefing, starter questions, chat input, answer cards, inspectable evidence, and resilient states.\",\"sourceQuote\":\"The frontend must be implemented in React and provide a user-friendly flow.\"}],\"obligations\":[],\"deliverables\":[{\"text\":\"Submit a Git repository with runnable local setup instructions and a README explaining architecture, AI design, data flow, privacy decisions, reliability strategy, deployment approach, and trade-offs.\",\"sourceQuote\":\"The candidate must deliver a Git repository with runnable local setup instructions and a README.\"}],\"risks\":[{\"severity\":\"medium\",\"text\":\"AI reliability, hallucination handling, privacy-safe logging, conversion failures, retrieval misses, provider failures, and network failures need explicit tests and safe recovery behavior.\",\"sourceQuote\":\"The implementation should fail safely when conversion, retrieval, provider, or network operations fail.\"}],\"uncertainties\":[\"The fixture describes expectations but does not prescribe a specific database or cloud topology.\"],\"recommendedQuestions\":[\"What backend requirements does the assessment specify?\",\"What frontend UX requirements should be implemented?\",\"What deliverables must the candidate provide?\"]}}}}}\n```"
+            }
+          ]
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 612,
+      "completion_tokens": 238,
+      "total_tokens": 850
+    }
+  }
+}
