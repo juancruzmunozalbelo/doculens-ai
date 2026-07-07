@@ -97,17 +97,17 @@
 
 ## 9. AWS Demo Infrastructure
 
-- [ ] 9.1 Add Dockerfile/container build path for one app container serving the React build and Node API
-- [ ] 9.2 Add app health endpoint for ALB target checks
-- [ ] 9.3 Add Terraform provider, variables, outputs, and README under `infra/aws`
-- [ ] 9.4 Add Terraform resources for ECR or explicit `image_uri` contract, ECS cluster, Fargate task/service, public ALB, target group, listener, and health check
-- [ ] 9.5 Add Terraform resources for RDS PostgreSQL with security group access restricted to the app service
-- [ ] 9.6 Add Terraform resources for Secrets Manager, IAM task execution role, and CloudWatch log group
-- [ ] 9.7 Ensure Terraform uses sensitive variables or secret bindings and does not require committed plaintext secrets
-- [ ] 9.8 Ensure Terraform creates/references secret containers or external secret ARNs without managing `secret_string` values or plaintext secrets in Terraform state
-- [ ] 9.9 Set bounded demo defaults: ECS desired count 1, small Fargate CPU/memory, minimal single-AZ RDS/storage, no NAT gateway, deletion protection false, and skip final snapshot true
-- [ ] 9.10 Add Terraform validation, plan review, optional apply, ALB health smoke, destroy, cleanup verification, and estimated cost instructions for the AWS demo account
-- [ ] 9.11 Run or document `terraform fmt -check`, `terraform validate`, and expected plan shape results
+- [x] 9.1 Add Dockerfile/container build path for one app container serving the React build and Node API
+- [x] 9.2 Add app health endpoint for ALB target checks
+- [x] 9.3 Add Terraform provider, variables, outputs, and README under `infra/aws`
+- [x] 9.4 Add Terraform resources for ECR or explicit `image_uri` contract, ECS cluster, Fargate task/service, public ALB, target group, listener, and health check
+- [x] 9.5 Add Terraform resources for RDS PostgreSQL with security group access restricted to the app service
+- [x] 9.6 Add Terraform resources for Secrets Manager, IAM task execution role, and CloudWatch log group
+- [x] 9.7 Ensure Terraform uses sensitive variables or secret bindings and does not require committed plaintext secrets
+- [x] 9.8 Ensure Terraform creates/references secret containers or external secret ARNs without managing `secret_string` values or plaintext secrets in Terraform state
+- [x] 9.9 Set bounded demo defaults: ECS desired count 1, small Fargate CPU/memory, minimal single-AZ RDS/storage, no NAT gateway, deletion protection false, and skip final snapshot true
+- [x] 9.10 Add Terraform validation, plan review, optional apply, ALB health smoke, destroy, cleanup verification, and estimated cost instructions for the AWS demo account
+- [x] 9.11 Run or document `terraform fmt -check`, `terraform validate`, and expected plan shape results
 
 ## 10. Final Verification
 
