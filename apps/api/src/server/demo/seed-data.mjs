@@ -9,7 +9,7 @@ export function buildDemoSeedData() {
         id: DEMO_USER_ID,
         email: 'demo@doculens.local',
         displayName: 'DocuLens Demo User',
-        passwordHash: 'scrypt$16384$8$1$doculens-demo-seed-v1$bJSlYm4y48cxSO_QaUA5UgcAJbKnWjf2GfOHIyCMwhULN4srwI_WloqucpZ_yo7VT45CiMrEvATb-PDzv5w_WA',
+        passwordHash: 'scrypt$16384$8$1$doculens-demo-seed-v2$Kk2WJhi80ffr7EOkCZsUZRiSZ9kk6esGakDLhx3yyitemYuTulVPdv9yPp_9a6fbYoXMBMFICS54z7BVoiUk5A',
       }),
       Object.freeze({
         id: AUTHZ_USER_ID,

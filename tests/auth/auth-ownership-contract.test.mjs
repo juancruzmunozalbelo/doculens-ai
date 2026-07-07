@@ -899,11 +899,16 @@ test('child-resource HTTP routes deny cross-user analysis, message, chunk, citat
   }
 });
 
-test('demo seed data includes both auth users, an owned NDA document, and an adversarial prompt-injection section', async () => {
+test('demo seed data includes auth users, verifies the walkthrough password, and seeds an adversarial NDA document', async () => {
   const loadDemoSeedData = await importRequired(
     'apps/api/src/server/demo/seed-data.mjs',
     ['loadDemoSeedData', 'buildDemoSeedData'],
     'demo seed data contract',
+  );
+  const createAuthService = await importRequired(
+    'apps/api/src/server/auth/service.mjs',
+    ['createAuthService', 'createAuthenticationService'],
+    'authentication service',
   );
   const seed = await loadDemoSeedData();
   const users = seed.users ?? [];
@@ -912,6 +917,82 @@ test('demo seed data includes both auth users, an owned NDA document, and an adv
 
   const demoUser = users.find((user) => user.email === 'demo@doculens.local');
   assert.ok(demoUser, 'seed data must include the demo user used for the assessment walkthrough');
+  const auth = createAuthService({
+    users: {
+      async findByEmail(email) {
+        return users.find((user) => user.email === String(email).toLowerCase()) ?? null;
+      },
+      async findById(id) {
+        return users.find((user) => user.id === id) ?? null;
+      },
+    },
+    jwtSecret,
+    tokenTtlSeconds: 900,
+    now: () => fixedNow,
+  });
+  let demoLogin;
+  try {
+    demoLogin = await auth.login({
+      email: 'demo@doculens.local',
+      password: 'Correct Horse Battery Staple',
+    });
+  } catch (error) {
+    assert.fail(`demo seed password hash must verify with the walkthrough password via the auth service: ${error.message}`);
+  }
+  assert.equal(
+    demoLogin.user.email,
+    'demo@doculens.local',
+    'demo seed login must identify the committed demo account',
+  );
+
+  const seedSql = await readFile(path.join(repoRoot, 'db/seeds/001_demo.sql'), 'utf8');
+  const sqlDemoMatch = seedSql.match(
+    /\('([^']+)',\s*'demo@doculens\.local',\s*'([^']+)',\s*'([^']+)'\)/,
+  );
+  assert.ok(sqlDemoMatch, 'SQL seed must include the demo user row used for the assessment walkthrough');
+  const [, sqlDemoId, sqlDemoPasswordHash, sqlDemoDisplayName] = sqlDemoMatch;
+  const sqlAuth = createAuthService({
+    users: {
+      async findByEmail(email) {
+        return String(email).toLowerCase() === 'demo@doculens.local'
+          ? {
+              id: sqlDemoId,
+              email: 'demo@doculens.local',
+              password_hash: sqlDemoPasswordHash,
+              display_name: sqlDemoDisplayName,
+            }
+          : null;
+      },
+      async findById(id) {
+        return id === sqlDemoId
+          ? {
+              id: sqlDemoId,
+              email: 'demo@doculens.local',
+              password_hash: sqlDemoPasswordHash,
+              display_name: sqlDemoDisplayName,
+            }
+          : null;
+      },
+    },
+    jwtSecret,
+    tokenTtlSeconds: 900,
+    now: () => fixedNow,
+  });
+  let sqlDemoLogin;
+  try {
+    sqlDemoLogin = await sqlAuth.login({
+      email: 'demo@doculens.local',
+      password: 'Correct Horse Battery Staple',
+    });
+  } catch (error) {
+    assert.fail(`SQL demo seed password hash must verify with the walkthrough password via the auth service: ${error.message}`);
+  }
+  assert.equal(
+    sqlDemoLogin.user.email,
+    'demo@doculens.local',
+    'SQL demo seed login must identify the committed demo account',
+  );
+
   const authzUser = users.find((user) => user.email === 'authz-test@doculens.local');
   assert.ok(authzUser, 'seed data must include a second authz-test user for cross-user denial checks');
   assert.notEqual(authzUser.id, demoUser.id, 'demo and authz-test users must be distinct owners');
