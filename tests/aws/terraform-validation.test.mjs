@@ -240,7 +240,7 @@ test('Terraform files under infra/aws model the tiny ECS ALB RDS Secrets Manager
   assert.match(model.hcl, /from_port\s*=\s*5432[\s\S]*security_groups\s*=\s*\[[^\]]*aws_security_group\.app\.id/, 'RDS security group must allow PostgreSQL only from the app service security group');
 });
 
-test('Terraform ECS task definition declares the ARM64 Fargate runtime platform', async () => {
+test('Terraform ECS task definition declares the GitHub-built X86_64 Fargate runtime platform', async () => {
   const { hcl } = await terraformModel();
   const taskDefinition = hclBlockBody(
     hcl,
@@ -250,8 +250,8 @@ test('Terraform ECS task definition declares the ARM64 Fargate runtime platform'
 
   assert.match(
     taskDefinition,
-    /\bruntime_platform\s*\{[\s\S]*?\bcpu_architecture\s*=\s*"ARM64"[\s\S]*?\}/,
-    'ECS Fargate task definition must declare runtime_platform.cpu_architecture = "ARM64" for Apple Silicon-built images',
+    /\bruntime_platform\s*\{[\s\S]*?\bcpu_architecture\s*=\s*"X86_64"[\s\S]*?\}/,
+    'ECS Fargate task definition must match the linux/amd64 image produced by GitHub-hosted Docker builds',
   );
 });
 
