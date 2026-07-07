@@ -260,7 +260,7 @@ Required environment variables:
 ```bash
 AI_PROVIDER=minimax
 MINIMAX_API_KEY=<provided-out-of-band>
-MINIMAX_BASE_URL=https://api.minimax.chat/v1
+MINIMAX_BASE_URL=https://api.minimax.io/v1
 MINIMAX_MODEL=MiniMax-M3
 JWT_SECRET=<strong-local-secret-at-least-32-chars>
 DATABASE_URL=postgresql://...

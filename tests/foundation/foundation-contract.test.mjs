@@ -142,7 +142,7 @@ test('runtime configuration rejects weak or default JWT_SECRET outside explicit 
     DATABASE_URL: 'postgresql://doculens_test:doculens_test@localhost:5432/doculens_test',
     AI_PROVIDER: 'minimax',
     MINIMAX_API_KEY: 'placeholder-for-contract-test',
-    MINIMAX_BASE_URL: 'https://api.minimax.chat/v1',
+    MINIMAX_BASE_URL: 'https://api.minimax.io/v1',
     MINIMAX_MODEL: 'MiniMax-M3',
   };
 

@@ -67,7 +67,7 @@ function testConfig() {
     aiProvider: 'minimax',
     minimax: Object.freeze({
       apiKey: 'minimax-contract-placeholder',
-      baseUrl: 'https://api.minimax.chat/v1',
+      baseUrl: 'https://api.minimax.io/v1',
       model: 'MiniMax-M3',
     }),
   });

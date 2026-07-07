@@ -32,16 +32,16 @@
 
 ## 4. AI Provider and Prompting
 
-- [ ] 4.1 Define `AIProvider` interface separating prompt construction, model invocation, and response post-processing
-- [ ] 4.2 Implement prompt IDs and prompt versions for analysis, chat, fallback, unsupported-answer checks, and prompt-injection guardrails
-- [ ] 4.3 Implement `MiniMaxProvider` using configured base URL, API key, and `MiniMax-M3` model
-- [ ] 4.4 Add live MiniMax smoke command or test that invokes MiniMax M3 with redacted logs and validates response shape, provider metadata, model metadata, and error handling
-- [ ] 4.5 Add prompt-injection guardrails treating document content as untrusted evidence only
-- [ ] 4.6 Ensure prompt construction delimits untrusted document/chunk text and never includes API keys, JWTs, or plaintext secrets
-- [ ] 4.7 Record provider, model, prompt version, context strategy, thinking mode, retrieved chunk IDs, fallback reason, retrieval score summary, and token estimates in AI responses
-- [ ] 4.8 Add MiniMax live-call budget gate for max calls per command, max input/output tokens, max context tokens, timeout, retry/backoff cap, concurrency limit, and per-run estimated cost
-- [ ] 4.9 Add explicit live MiniMax opt-in/disclosure for analysis, chat, fallback, eval, and E2E paths, including maximum document/context size rules
-- [ ] 4.10 Add centralized redaction for MiniMax API keys, JWT secrets, database URLs/passwords, authorization headers, raw document text, full prompts, provider responses, and stack traces
+- [x] 4.1 Define `AIProvider` interface separating prompt construction, model invocation, and response post-processing
+- [x] 4.2 Implement prompt IDs and prompt versions for analysis, chat, fallback, unsupported-answer checks, and prompt-injection guardrails
+- [x] 4.3 Implement `MiniMaxProvider` using configured base URL, API key, and `MiniMax-M3` model
+- [x] 4.4 Add live MiniMax smoke command or test that invokes MiniMax M3 with redacted logs and validates response shape, provider metadata, model metadata, and error handling
+- [x] 4.5 Add prompt-injection guardrails treating document content as untrusted evidence only
+- [x] 4.6 Ensure prompt construction delimits untrusted document/chunk text and never includes API keys, JWTs, or plaintext secrets
+- [x] 4.7 Record provider, model, prompt version, context strategy, thinking mode, retrieved chunk IDs, fallback reason, retrieval score summary, and token estimates in AI responses
+- [x] 4.8 Add MiniMax live-call budget gate for max calls per command, max input/output tokens, max context tokens, timeout, retry/backoff cap, concurrency limit, and per-run estimated cost
+- [x] 4.9 Add explicit live MiniMax opt-in/disclosure for analysis, chat, fallback, eval, and E2E paths, including maximum document/context size rules
+- [x] 4.10 Add centralized redaction for MiniMax API keys, JWT secrets, database URLs/passwords, authorization headers, raw document text, full prompts, provider responses, and stack traces
 
 ## 5. Analysis and Chat Behavior
 
@@ -128,7 +128,7 @@
 - [ ] 11.3 Deliver PR 2 on `feat/doculens-auth` for authentication and ownership tasks 2.1-2.6 with cross-user denial and child-resource authorization tests
 - [x] 11.4 Deliver PR 3 on `feat/doculens-ingestion` for ingestion/chunking tasks 3.1-3.3 with chunking, rollback, ownership, and PostgreSQL integrity tests
 - [ ] 11.5 Deliver PR 4 on `feat/doculens-retrieval` for retrieval/fallback tasks 3.4-3.9 with pgvector/hybrid preferred, labeled `lexical_fallback` only if blocked, backend metadata, and fallback policy tests
-- [ ] 11.6 Deliver PR 5 on `feat/doculens-minimax` for AI provider and prompt safety tasks 4.1-4.10 with MiniMax live-smoke shape validation, budget gates, prompt-injection guardrails, and redaction canaries
+- [x] 11.6 Deliver PR 5 on `feat/doculens-minimax` for AI provider and prompt safety tasks 4.1-4.10 with MiniMax live-smoke shape validation, budget gates, prompt-injection guardrails, and redaction canaries
 - [ ] 11.7 Deliver PR 6 on `feat/doculens-chat-api` for analysis/chat tasks 5.1-5.8 with structured analysis, RAG citations, unsupported-answer behavior, fallback metadata, and prompt-injection eval proof
 - [ ] 11.8 Deliver PR 7 on `feat/doculens-ui` for frontend tasks 6.1-6.7 with Playwright E2E using only canonical `data-testid` locators
 - [ ] 11.9 Deliver PR 8 on `feat/doculens-eval` for eval/security proof tasks 7.1-7.16 gaps, including retrieval, fallback, citations, unsupported answers, prompt injection, authz, redaction, budget, and PostgreSQL integrity checks

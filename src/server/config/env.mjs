@@ -1,4 +1,4 @@
-const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimax.chat/v1';
+const DEFAULT_MINIMAX_BASE_URL = 'https://api.minimax.io/v1';
 const DEFAULT_MINIMAX_MODEL = 'MiniMax-M3';
 const ALLOWED_PROVIDERS = new Set(['minimax']);
 const WEAK_JWT_SECRETS = new Set([
