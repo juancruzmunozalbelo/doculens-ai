@@ -116,6 +116,24 @@ function parseJsonContent(content) {
   }
 }
 
+function analysisFromParsedContent(parsed) {
+  if (parsed && typeof parsed === 'object' && typeof parsed.summary === 'string' && parsed.summary.trim() !== '') {
+    return parsed;
+  }
+  const summary = typeof parsed?.answer === 'string' && parsed.answer.trim() !== ''
+    ? parsed.answer
+    : typeof parsed?.content === 'string' && parsed.content.trim() !== ''
+      ? parsed.content
+      : 'MiniMax returned analysis text without structured JSON.';
+  return {
+    summary,
+    entities: Array.isArray(parsed?.entities) ? parsed.entities : [],
+    obligations: Array.isArray(parsed?.obligations) ? parsed.obligations : [],
+    risks: Array.isArray(parsed?.risks) ? parsed.risks : [],
+    uncertainties: Array.isArray(parsed?.uncertainties) ? parsed.uncertainties : ['Provider returned prose instead of structured JSON.'],
+  };
+}
+
 function tokenUsageFrom(providerResponse) {
   const usage = providerResponse?.usage ?? {};
   const input = usage.prompt_tokens ?? usage.input_tokens ?? usage.total_prompt_tokens ?? null;
@@ -280,7 +298,7 @@ export function createMiniMaxProvider({
       secrets: { ...secrets, minimaxApiKey: configuredApiKey },
     });
     const { parsed, metadata } = await invoke({ prompt, messages, context: { ...context, strategy: context.strategy ?? 'analysis' } });
-    return { analysis: parsed, metadata };
+    return { analysis: analysisFromParsedContent(parsed), metadata };
   }
 
   return assertAIProvider({ answerQuestion, analyzeDocument });

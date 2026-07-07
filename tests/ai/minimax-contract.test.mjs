@@ -121,6 +121,72 @@ test('MiniMaxProvider satisfies the AIProvider contract and returns auditable pr
   );
 });
 
+test('MiniMaxProvider normalizes prose analysis responses into service-acceptable analysis shape', async () => {
+  const { createMiniMaxProvider } = await importRequired(
+    'apps/api/src/server/ai/minimax-provider.mjs',
+    ['createMiniMaxProvider'],
+    'MiniMax provider',
+  );
+
+  const proseSummary = 'The agreement requires Acme to protect Beta financial information for three years and flags unresolved audit-scope uncertainty.';
+  const transportCalls = [];
+  const provider = createMiniMaxProvider({
+    apiKey: 'sk-minimax_analysis_prose_canary_1234567890',
+    baseUrl: 'https://api.minimax.io/v1',
+    model: 'MiniMax-M3',
+    transport: async (request) => {
+      transportCalls.push(request);
+      return {
+        id: 'minimax-analysis-prose-response-1',
+        model: 'MiniMax-M3',
+        choices: [{ message: { content: proseSummary } }],
+        usage: { prompt_tokens: 88, completion_tokens: 21, total_tokens: 109 },
+      };
+    },
+  });
+
+  const result = await provider.analyzeDocument({
+    documentId: 'doc-analysis-prose',
+    userId: 'user-1',
+    document: {
+      id: 'doc-analysis-prose',
+      title: 'NDA',
+      text: 'Acme must protect Beta financial information for three years. Audit scope remains unresolved.',
+    },
+    prompt: { id: analysisPromptId, version: '2026-07-07.1' },
+    context: { strategy: 'full_document', thinkingMode: 'standard' },
+  });
+
+  assert.equal(transportCalls.length, 1, 'analysis must make exactly one deterministic MiniMax transport call');
+  assert.deepEqual(
+    result.analysis,
+    {
+      summary: proseSummary,
+      entities: [],
+      obligations: [],
+      risks: [],
+      uncertainties: ['Provider returned prose instead of structured JSON.'],
+    },
+    'prose MiniMax content must be normalized into the structured analysis contract required by the service layer',
+  );
+  assert.deepEqual(
+    result.metadata,
+    {
+      provider: 'minimax',
+      model: 'MiniMax-M3',
+      promptId: analysisPromptId,
+      promptVersion: '2026-07-07.1',
+      contextStrategy: 'full_document',
+      retrievalBackend: null,
+      fallbackReason: null,
+      providerResponseId: 'minimax-analysis-prose-response-1',
+      tokenUsage: { input: 88, output: 21, total: 109 },
+      thinkingMode: 'standard',
+    },
+    'normalized prose analysis must retain auditable provider/model/prompt/context metadata',
+  );
+});
+
 test('prompt registry exposes versioned prompt IDs for analysis, chat, fallback, unsupported, and prompt-injection handling', async (t) => {
   const { getPromptDefinition } = await importRequired(
     'apps/api/src/server/ai/prompts/registry.mjs',

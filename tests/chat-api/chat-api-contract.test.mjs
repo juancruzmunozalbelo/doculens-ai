@@ -476,6 +476,51 @@ test('chat endpoint retrieves chunks before provider invocation, grounds RAG pro
   assert.equal(chatRepository.saved.length, 1, 'chat answer, citations, and metadata must be persisted for auditability');
 });
 
+test('chat endpoint supplies a retrieved chunk citation when a RAG provider omits citations', async (t) => {
+  const retrievedChunk = {
+    chunkId: 'chunk-confidentiality',
+    documentId: ownedDocument.id,
+    headingPath: ['Mutual NDA', 'Confidentiality'],
+    content: 'Acme must keep Beta financial information confidential for three years.',
+    contentExcerpt: 'Acme must keep Beta financial information confidential for three years.',
+    chunkIndex: 0,
+    tokenEstimate: 11,
+    normalizedScore: 0.92,
+  };
+  const retrievalProvider = createRetrievalProviderFake({ chunks: [retrievedChunk] });
+  const aiProvider = createAiProviderFake({
+    chatResult: {
+      text: 'Acme must keep Beta financial information confidential for three years.',
+      citations: [],
+    },
+  });
+  const chatRepository = createChatRepositoryFake();
+  const { baseUrl } = await createServerHarness(t, { retrievalProvider, aiProvider, chatRepository });
+
+  const response = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
+    method: 'POST',
+    body: { question: 'How long must Acme protect Beta financial information?' },
+  });
+
+  assert.equal(response.status, 201, 'RAG chat with retrieved evidence should create a grounded answer');
+  assert.equal(response.body.answer.metadata.contextStrategy, 'rag');
+  assert.deepEqual(
+    response.body.answer.citations.map((citation) => citation.chunkId),
+    ['chunk-confidentiality'],
+    'RAG answers must cite a retrieved chunk even when the provider omits citations',
+  );
+  assert.deepEqual(
+    chatRepository.saved[0].answer.citations.map((citation) => citation.chunkId),
+    ['chunk-confidentiality'],
+    'persisted chat answer must retain the synthesized retrieved chunk citation',
+  );
+  assert.deepEqual(
+    chatRepository.saved[0].citations.map((citation) => citation.chunkId),
+    ['chunk-confidentiality'],
+    'persisted audit citation list must retain the synthesized retrieved chunk citation',
+  );
+});
+
 test('analysis and chat metadata expose safe audit fields but drop raw prompt and provider response fields', async (t) => {
   const rawMetadata = {
     provider: 'minimax',

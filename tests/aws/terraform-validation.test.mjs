@@ -82,6 +82,28 @@ function collectBlocks(source, kind) {
     .map((match) => (match[2] ? `${match[1]}.${match[2]}` : match[1]));
 }
 
+function hclBlockBody(source, blockPattern, label) {
+  const match = blockPattern.exec(source);
+  assert.ok(match, `${label} must exist`);
+
+  const openBraceIndex = source.indexOf('{', match.index);
+  assert.notEqual(openBraceIndex, -1, `${label} must open a block`);
+
+  let depth = 0;
+  for (let index = openBraceIndex; index < source.length; index += 1) {
+    if (source[index] === '{') {
+      depth += 1;
+    } else if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(openBraceIndex + 1, index);
+      }
+    }
+  }
+
+  assert.fail(`${label} must close its block`);
+}
+
 function assertIncludesAll(actual, expected, label) {
   for (const item of expected) {
     assert.equal(actual.includes(item), true, `${label} must include ${item}`);
@@ -215,6 +237,21 @@ test('Terraform files under infra/aws model the tiny ECS ALB RDS Secrets Manager
   assert.match(model.hcl, /health_check\s*\{[\s\S]*?path\s*=\s*"\/health"[\s\S]*?\}/, 'ALB target group health check must use /health');
   assert.match(model.hcl, /awslogs-group|aws_cloudwatch_log_group\.app/, 'ECS task definition must send app logs to CloudWatch');
   assert.match(model.hcl, /from_port\s*=\s*5432[\s\S]*security_groups\s*=\s*\[[^\]]*aws_security_group\.app\.id/, 'RDS security group must allow PostgreSQL only from the app service security group');
+});
+
+test('Terraform ECS task definition declares the ARM64 Fargate runtime platform', async () => {
+  const { hcl } = await terraformModel();
+  const taskDefinition = hclBlockBody(
+    hcl,
+    /\bresource\s+"aws_ecs_task_definition"\s+"app"\s*\{/,
+    'ECS app task definition',
+  );
+
+  assert.match(
+    taskDefinition,
+    /\bruntime_platform\s*\{[\s\S]*?\bcpu_architecture\s*=\s*"ARM64"[\s\S]*?\}/,
+    'ECS Fargate task definition must declare runtime_platform.cpu_architecture = "ARM64" for Apple Silicon-built images',
+  );
 });
 
 test('Terraform demo model keeps secrets out of state and uses bounded destroy-safe infrastructure', async () => {
