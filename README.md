@@ -154,6 +154,31 @@ Prerequisites:
 - npm
 - PostgreSQL 16+ for full persistence.
 - `pgvector`-capable PostgreSQL for `RETRIEVAL_BACKEND=pgvector` or `RETRIEVAL_BACKEND=hybrid`; Docker Compose uses `pgvector/pgvector:pg16`.
+
+### Fastest local path: Docker Compose
+
+Use this when the reviewer wants the simplest local run. Compose starts the React frontend, Node API, and a pgvector-capable PostgreSQL database:
+
+```bash
+POSTGRES_PASSWORD=local-postgres \
+JWT_SECRET=DocuLensLocalJwtSecret1234567890Aa \
+MINIMAX_API_KEY=minimax-local-placeholder \
+RETRIEVAL_BACKEND=hybrid \
+EMBEDDING_PROVIDER=local_hashing \
+EMBEDDING_MODEL=doculens-local-hashing-v1 \
+EMBEDDING_DIMENSIONS=384 \
+EMBEDDING_STRICT=false \
+docker-compose up --build
+```
+
+Open `http://127.0.0.1:5173` for the UI and `http://127.0.0.1:3000/health` for the API health check. Use a real `MINIMAX_API_KEY` for live analysis/chat; the placeholder is only for booting local non-live paths. Stop and remove local database volume with:
+
+```bash
+docker-compose down -v
+```
+
+### Manual local path
+
 Install:
 
 ```bash
