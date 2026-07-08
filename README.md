@@ -171,7 +171,7 @@ EMBEDDING_STRICT=false \
 docker-compose up --build
 ```
 
-Open `http://127.0.0.1:5173` for the UI and `http://127.0.0.1:3000/health` for the API health check. Use a real `MINIMAX_API_KEY` for live analysis/chat; the placeholder is only for booting local non-live paths. Stop and remove local database volume with:
+Open `http://127.0.0.1:5173` for the UI and `http://127.0.0.1:3000/health` for the API health check. The seeded local walkthrough login is `demo@doculens.local` with password `Correct Horse Battery Staple`. Use a real `MINIMAX_API_KEY` for live analysis/chat; the placeholder is only for booting local non-live paths. Stop and remove local database volume with:
 
 ```bash
 docker-compose down -v
