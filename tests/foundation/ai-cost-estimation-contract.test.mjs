@@ -271,6 +271,37 @@ test('README connects estimates to fail-closed MiniMax budget guardrails before 
   }
 });
 
+test('README documents AWS demo infrastructure cost estimates separately from provider token costs', async () => {
+  const section = await costSection();
+
+  for (const required of [
+    '## AWS demo cost estimate',
+    'These infrastructure estimates are separate from MiniMax provider token costs',
+    'Region: `us-east-1`',
+    '730` hours per month',
+    'Application Load Balancer',
+    '$22.27/month',
+    'ECS Fargate app task',
+    '$18.02/month',
+    'RDS PostgreSQL compute',
+    '$11.68/month',
+    'RDS gp3 storage',
+    '$2.30/month',
+    'Secrets Manager',
+    '$1.20/month',
+    'Approximate 24/7 AWS demo subtotal',
+    '~$56.20/month',
+    'Approximate 24-hour review window',
+    '~$1.85',
+    'Approximate 8-hour review window',
+    '~$0.62',
+    'Leaving the demo running 24/7 is the expensive path',
+    'For request-volume planning, add the MiniMax token estimates above to the AWS runtime subtotal',
+  ]) {
+    assertSectionIncludes(section, required, `AWS infrastructure cost coverage missing: ${required}`);
+  }
+});
+
 test('cost-estimation verification reads only the repo-local README without network access', async () => {
   const originalFetch = globalThis.fetch;
   const fetchCalls = [];

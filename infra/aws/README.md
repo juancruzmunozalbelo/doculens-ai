@@ -241,7 +241,7 @@ AWS-only operator evidence checklist:
 
 ## Cost and production gaps
 
-Estimated cost is bounded but not free: ALB hourly cost, one Fargate task while running, RDS micro instance/storage, CloudWatch logs, Secrets Manager containers, S3 backend storage, DynamoDB lock table requests, and data transfer. Destroy promptly after review.
+Estimated cost is bounded but not free. In `us-east-1`, the documented demo shape is roughly `$56.20/month` if left running 24/7: ALB about `$22.27/month`, one 0.5 vCPU / 1 GiB Fargate task about `$18.02/month`, RDS `db.t4g.micro` compute about `$11.68/month`, 20 GiB gp3 RDS storage about `$2.30/month`, three Secrets Manager secrets about `$1.20/month`, plus small CloudWatch Logs, ECR image storage, S3 backend storage, DynamoDB lock requests, and data-transfer charges. A short review window is much cheaper: about `$1.85` for 24 hours or `$0.62` for 8 hours before traffic/log-transfer variance. Destroy promptly after review; storage, secrets, ECR images, S3 state, and logs can continue billing until removed.
 
 This demo intentionally omits or simplifies production controls: HTTPS/TLS certificates, private subnet workloads, NAT gateway design or VPC endpoints, database backup retention, final snapshot retention, WAF, rate limit controls, secret rotation, multi-AZ RDS, autoscaling, vulnerability scanning, least-privilege application task role hardening beyond the demo, custom domains, and observability beyond basic CloudWatch logs.
 

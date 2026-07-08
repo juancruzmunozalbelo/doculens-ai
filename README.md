@@ -116,6 +116,36 @@ Caveats:
 - The estimates use representative averages and repo token-estimation heuristics for planning; they are not billing reconciliation.
 - Streaming responses, LLM tool/function calling, and queue/worker processing remain out of scope for this assessment implementation.
 
+## AWS demo cost estimate
+
+These infrastructure estimates are separate from MiniMax provider token costs. Assumptions, captured on 2026-07-08:
+
+- Region: `us-east-1`, matching `infra/aws/variables.tf`.
+- Runtime shape: one public Application Load Balancer, one ECS Fargate task at `0.5 vCPU` / `1 GiB`, one single-AZ RDS PostgreSQL `db.t4g.micro`, `20 GiB` gp3 storage, three Secrets Manager secrets, one CloudWatch log group, one ECR image, and tiny S3/DynamoDB Terraform backend usage.
+- Time basis: `730` hours per month; "review day" estimates assume resources are destroyed after the stated runtime.
+- AWS pricing assumptions: ALB `$0.0225/hour` plus one LCU at `$0.008/LCU-hour`; Fargate Linux/x86 in `us-east-1` at `$0.0404784/vCPU-hour` and `$0.004446/GB-hour`; RDS PostgreSQL `db.t4g.micro` single-AZ at `$0.016/instance-hour`; RDS gp3 storage at `$0.115/GB-month`; Secrets Manager at `$0.40/secret-month`; CloudWatch Logs standard ingest/storage at `$0.50/GB ingested` and `$0.03/GB-month`; ECR private storage at `$0.10/GB-month`; S3 Standard at `$0.023/GB-month`; DynamoDB on-demand requests are treated as pennies for Terraform locking at this scale.
+
+| AWS demo resource | Planning quantity | Estimate |
+| --- | ---: | ---: |
+| Application Load Balancer | 730 hours + 1 LCU-hour/hour | $22.27/month |
+| ECS Fargate app task | 0.5 vCPU + 1 GiB for 730 hours | $18.02/month |
+| RDS PostgreSQL compute | `db.t4g.micro`, single-AZ, 730 hours | $11.68/month |
+| RDS gp3 storage | 20 GiB provisioned | $2.30/month |
+| Secrets Manager | 3 secrets | $1.20/month before API-call pennies |
+| CloudWatch Logs | 1 GiB ingest + 1 GiB archived storage planning allowance | $0.53/month before free-tier effects |
+| ECR image storage | 1 GiB private image storage planning allowance | $0.10/month before free-tier effects |
+| Terraform backend | 1 GiB S3 state + low DynamoDB lock traffic | <$0.10/month |
+| Approximate 24/7 AWS demo subtotal | Running all month | ~$56.20/month |
+| Approximate 24-hour review window | Run for one day, then destroy | ~$1.85 |
+| Approximate 8-hour review window | Run for a review session, then destroy | ~$0.62 |
+
+Caveats:
+
+- This is a planning estimate, not an AWS bill. Taxes, data transfer, NAT gateways, VPC endpoints, backups/snapshots, WAF, Route 53, ACM, CloudWatch alarms, higher log volume, RDS CPU credit surplus, Multi-AZ, autoscaling, and longer retention are excluded.
+- Leaving the demo running 24/7 is the expensive path; ALB, Fargate, and RDS compute dominate the monthly subtotal. Destroy promptly after review.
+- RDS storage, Secrets Manager, ECR storage, S3 state, and residual logs can continue costing money until deleted even if compute is stopped.
+- For request-volume planning, add the MiniMax token estimates above to the AWS runtime subtotal for the period when the stack is live.
+
 ## Local quick start
 
 Prerequisites:
