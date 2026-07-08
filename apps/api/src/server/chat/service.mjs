@@ -305,6 +305,133 @@ function documentForProvider(document) {
   };
 }
 
+function compactDisplayText(value) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function clippedDisplayText(value, maxLength = 520) {
+  const text = compactDisplayText(value);
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function analysisSectionTitle(section) {
+  if (typeof section === 'string') {
+    return section;
+  }
+  if (isObject(section)) {
+    return section.title ?? section.heading ?? section.name ?? '';
+  }
+  return '';
+}
+
+function markdownSectionsFromText(text) {
+  const sections = [];
+  let current = null;
+  for (const line of String(text ?? '').split('\n')) {
+    const heading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+    if (heading) {
+      if (current) {
+        sections.push(current);
+      }
+      current = { title: compactDisplayText(heading[1]), lines: [] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) {
+    sections.push(current);
+  }
+  return sections
+    .map((section) => ({
+      title: section.title,
+      text: compactDisplayText(section.lines.join('\n')),
+    }))
+    .filter((section) => section.title || section.text);
+}
+
+function sourceSentencesFromText(text) {
+  return compactDisplayText(text)
+    .match(/[^.!?]+[.!?]?/g)
+    ?.map((sentence) => compactDisplayText(sentence))
+    .filter((sentence) => sentence.length >= 24) ?? [];
+}
+
+function fallbackAnalysisItem({ title, text, secrets, warnings }) {
+  const safeTitle = clippedDisplayText(title, 120);
+  const safeText = clippedDisplayText(text || title, 620);
+  const safeQuote = clippedDisplayText(text || title, 220);
+  return sanitizeDisplayValue({
+    ...(safeTitle ? { category: safeTitle } : {}),
+    text: safeText,
+    ...(safeQuote ? { sourceQuote: safeQuote } : {}),
+  }, secrets, warnings);
+}
+
+function derivedAnalysisItems({ document, sections, kind, secrets, warnings }) {
+  const text = document?.text ?? document?.content ?? '';
+  const maxItems = kind === 'deliverables' ? 4 : 8;
+  const sectionPattern = kind === 'deliverables'
+    ? /\b(?:deliverables?|submission|readme|repository|git)\b/i
+    : /\b(?:requirements?|backend|frontend|retrieval|privacy|logging|reliability|evaluation|deployment|operations|application\s+scope|ai\b)\b/i;
+  const sentencePattern = kind === 'deliverables'
+    ? /\b(?:deliver|submit|submission|readme|git\s+repository|repository|runnable\s+local\s+setup)\b/i
+    : /\b(?:must|should|expected|expects|required|requirements?|jwt|rest\s+api|react|aws|terraform|cloudformation|provider|retrieval|privacy|logging|tests?)\b/i;
+  const excludedSectionPattern = kind === 'requirements'
+    ? /\b(?:overview|objective|rubric|deliverables?)\b/i
+    : /\b(?:overview|objective|rubric)\b/i;
+
+  const items = [];
+  for (const section of markdownSectionsFromText(text)) {
+    if (items.length >= maxItems) {
+      break;
+    }
+    if (sectionPattern.test(section.title) && !excludedSectionPattern.test(section.title)) {
+      items.push(fallbackAnalysisItem({
+        title: section.title,
+        text: section.text || section.title,
+        secrets,
+        warnings,
+      }));
+    }
+  }
+
+  if (items.length > 0) {
+    return items;
+  }
+
+  const seenSentences = new Set();
+  for (const sentence of sourceSentencesFromText(text)) {
+    if (items.length >= maxItems) {
+      break;
+    }
+    const normalized = sentence.toLowerCase();
+    if (!sentencePattern.test(sentence) || seenSentences.has(normalized)) {
+      continue;
+    }
+    seenSentences.add(normalized);
+    items.push(fallbackAnalysisItem({
+      title: kind === 'deliverables' ? 'Deliverable' : 'Requirement',
+      text: sentence,
+      secrets,
+      warnings,
+    }));
+  }
+
+  if (items.length > 0) {
+    return items;
+  }
+
+  return asArray(sections)
+    .map(analysisSectionTitle)
+    .filter((title) => sectionPattern.test(title) && !excludedSectionPattern.test(title))
+    .slice(0, maxItems)
+    .map((title) => fallbackAnalysisItem({ title, text: title, secrets, warnings }));
+}
+
+
 function secretsForProvider(secrets) {
   const providerSecrets = Object.fromEntries(secrets.map((value, index) => [`configuredSecret${index + 1}`, value]));
   Object.defineProperty(providerSecrets, 'toJSON', { value: () => ({}), enumerable: false });
@@ -325,7 +452,7 @@ function tokenMetadata(metadata = {}) {
   return tokenEstimate;
 }
 
-function normalizeAnalysisResult(providerResult, { secrets }) {
+function normalizeAnalysisResult(providerResult, { secrets, document = null }) {
   const source = isObject(providerResult?.analysis) ? providerResult.analysis : providerResult;
   if (!isObject(source)) {
     const error = new Error('AI provider returned invalid analysis');
@@ -359,6 +486,28 @@ function normalizeAnalysisResult(providerResult, { secrets }) {
       },
     },
   };
+
+  if (analysis.requirements.length === 0) {
+    analysis.requirements = derivedAnalysisItems({
+      document,
+      sections: analysis.sections,
+      kind: 'requirements',
+      secrets,
+      warnings: displayWarnings,
+    });
+  }
+  if (analysis.deliverables.length === 0) {
+    analysis.deliverables = derivedAnalysisItems({
+      document,
+      sections: analysis.sections,
+      kind: 'deliverables',
+      secrets,
+      warnings: displayWarnings,
+    });
+  }
+  analysis.displayWarnings = [...new Set(displayWarnings)];
+  analysis.metadata.displaySafety.redactionWarnings = [...new Set(displayWarnings)];
+
 
   if (typeof analysis.metadata.provider !== 'string' || analysis.metadata.provider.trim() === '') {
     const error = new Error('analysis metadata provider is required');
@@ -934,7 +1083,7 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
       context: { strategy: 'full_document', thinkingMode: 'standard' },
       secrets: secretsForProvider(secrets),
     });
-    const analysis = normalizeAnalysisResult(providerResult, { secrets });
+    const analysis = normalizeAnalysisResult(providerResult, { secrets, document: providerDocument });
     const saved = await maybeSave(analysisStore, {
       documentId: document.id,
       userId: currentUser.id,
