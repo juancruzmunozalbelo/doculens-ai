@@ -654,7 +654,8 @@ function AppStyles() {
       .screen-shell, .review-workspace, .workspace-grid, .workspace-sources, .workspace-chat-band, .intake-grid, .login-grid, .intake-grid > *, .login-grid > *, .source-management-panel, .source-preview-column, [data-testid="${TEST_IDS.activeSource}"], [data-testid="${TEST_IDS.sourceCreate}"], [data-testid="${TEST_IDS.sourceCard}"] { min-width: 0; }
       .source-title-text, .source-filename-text { display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
       .source-filename-text { color: inherit; }
-      .source-preview-column { grid-area: preview; max-width: 100%; overflow: hidden; }
+      .source-preview-column { grid-area: preview; max-width: 100%; height: clamp(20rem, 52vh, 34rem); overflow: hidden; display: flex; flex-direction: column; align-self: start; }
+      .source-preview-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
       .source-preview-column [data-testid="${TEST_IDS.evidenceExcerpt}"] { overflow-wrap: anywhere; word-break: break-word; }
       .source-card-enter { animation: card-in 180ms ease-out; }
       .status-dot { width: 0.48rem; height: 0.48rem; border-radius: 999px; background: #2563eb; display: inline-block; animation: pulse 900ms ease-in-out infinite alternate; }
@@ -664,7 +665,7 @@ function AppStyles() {
       @keyframes pulse { from { transform: translateY(0); opacity: .45; } to { transform: translateY(-2px); opacity: 1; } }
       @keyframes card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
       @media (max-width: 1060px) { .workspace-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sources" "preview" "briefing" "chat"; } .workspace-sources { grid-template-columns: minmax(0, 1fr); } .intake-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sources" "create" "preview"; } .source-preview-column { grid-column: auto; } }
-      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .login-feature-grid { grid-template-columns: minmax(0, 1fr); } .app-header { align-items: flex-start !important; } .source-preview-column { max-height: min(60vh, 34rem); overflow: auto; } }
+      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .login-feature-grid { grid-template-columns: minmax(0, 1fr); } .app-header { align-items: flex-start !important; } .source-preview-column { height: clamp(18rem, 58vh, 32rem); } }
       @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; } }
       @media print {
         body { background: #ffffff !important; }
@@ -920,7 +921,7 @@ function SourcePreview({ document, activeEvidence }) {
       <h2 id="source-preview-heading">Source preview</h2>
       <p data-testid={TEST_IDS.evidenceSource} style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>Source:</strong> {sourceTitle(document)}</p>
       <p data-testid={TEST_IDS.evidenceSection}><strong>{activeEvidence ? 'Highlighted citation' : 'Preview'}:</strong> {sanitizeDisplayText(section, 'Source overview')}</p>
-      <div ref={excerptRef} tabIndex={activeEvidence ? -1 : undefined} style={{ border: `2px solid ${activeEvidence ? '#f59e0b' : '#e2e8f0'}`, borderRadius: '14px', padding: '0.8rem', background: activeEvidence ? '#fffbeb' : '#f8fafc' }} aria-label={activeEvidence ? 'Highlighted source excerpt' : 'Source preview excerpt'}>
+      <div ref={excerptRef} tabIndex={activeEvidence ? -1 : undefined} className="source-preview-scroll" style={{ border: `2px solid ${activeEvidence ? '#f59e0b' : '#e2e8f0'}`, borderRadius: '14px', padding: '0.8rem', background: activeEvidence ? '#fffbeb' : '#f8fafc' }} aria-label={activeEvidence ? 'Highlighted source excerpt' : 'Source preview excerpt'}>
         <p data-testid={TEST_IDS.evidenceExcerpt} style={{ whiteSpace: 'pre-wrap', margin: 0 }}>{sanitizeDisplayText(text, 'Source excerpt unavailable.')}</p>
       </div>
       <p style={{ color: '#64748b' }}>{activeEvidence ? 'The highlighted excerpt is shown here for review.' : 'Ask a question or select evidence to highlight source text here.'}</p>

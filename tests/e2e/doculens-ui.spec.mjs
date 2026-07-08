@@ -360,33 +360,45 @@ async function expectContainedNarrowSourcePreview(page) {
   const layout = await page.evaluate((testIds) => {
     const root = document.documentElement;
     const select = (testId) => document.querySelector(`[data-testid="${testId}"]`);
-    const bounds = (testId) => select(testId)?.getBoundingClientRect();
-    const preview = bounds(testIds.evidencePanel);
-    const active = bounds(testIds.activeSource);
-    const sourceRail = bounds(testIds.sourceManagement);
-    const briefing = bounds(testIds.reviewBriefing);
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
     const previewNode = select(testIds.evidencePanel);
+    const previewScroll = previewNode?.querySelector('.source-preview-scroll') ?? select(testIds.evidenceExcerpt)?.parentElement;
+    const preview = toRect(previewNode);
+    const active = toRect(select(testIds.activeSource));
+    const sourceRail = toRect(select(testIds.sourceManagement));
+    const briefing = toRect(select(testIds.reviewBriefing));
+    const scrollStyle = previewScroll ? getComputedStyle(previewScroll) : null;
     const horizontallyContained = (rect) => !rect || (rect.left >= -2 && rect.right <= window.innerWidth + 2 && rect.width <= root.clientWidth + 2);
     return {
       scrollWidth: root.scrollWidth,
       clientWidth: root.clientWidth,
-      previewClientHeight: previewNode?.clientHeight ?? 0,
-      previewScrollHeight: previewNode?.scrollHeight ?? 0,
       viewportHeight: window.innerHeight,
+      preview,
       previewContained: horizontallyContained(preview),
       activeContained: horizontallyContained(active),
       sourceRailContained: horizontallyContained(sourceRail),
       briefingContained: horizontallyContained(briefing),
       briefingHeight: briefing?.height ?? 0,
+      previewScrollRect: toRect(previewScroll),
+      previewScrollClientHeight: previewScroll?.clientHeight ?? 0,
+      previewScrollScrollHeight: previewScroll?.scrollHeight ?? 0,
+      previewScrollOverflowY: scrollStyle?.overflowY ?? '',
     };
   }, TEST_IDS);
-  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 2);
-  expect(layout.previewContained).toBe(true);
-  expect(layout.activeContained).toBe(true);
-  expect(layout.sourceRailContained).toBe(true);
-  if (layout.briefingHeight > 0) expect(layout.briefingContained).toBe(true);
-  expect(layout.previewClientHeight).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
-  expect(layout.previewScrollHeight).toBeGreaterThan(layout.previewClientHeight);
+  const layoutDebug = `narrow source preview layout: ${JSON.stringify(layout)}`;
+  expect(layout.scrollWidth, layoutDebug).toBeLessThanOrEqual(layout.clientWidth + 2);
+  expect(layout.preview, layoutDebug).toBeTruthy();
+  expect(layout.previewContained, layoutDebug).toBe(true);
+  expect(layout.activeContained, layoutDebug).toBe(true);
+  expect(layout.sourceRailContained, layoutDebug).toBe(true);
+  if (layout.briefingHeight > 0) expect(layout.briefingContained, layoutDebug).toBe(true);
+  expect(layout.preview.height, layoutDebug).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
+  expect(layout.previewScrollRect, layoutDebug).toBeTruthy();
+  expect(layout.previewScrollOverflowY, layoutDebug).toMatch(/auto|scroll/i);
+  expect(layout.previewScrollScrollHeight, layoutDebug).toBeGreaterThan(layout.previewScrollClientHeight + 40);
 }
 
 async function expectNoHorizontalPageOverflow(page) {

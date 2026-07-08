@@ -431,6 +431,49 @@ function derivedAnalysisItems({ document, sections, kind, secrets, warnings }) {
     .map((title) => fallbackAnalysisItem({ title, text: title, secrets, warnings }));
 }
 
+function sourceDerivedAnalysisResult(document) {
+  const text = document?.text ?? document?.content ?? '';
+  const title = compactDisplayText(document?.title ?? document?.name ?? 'Selected source');
+  const markdownSections = markdownSectionsFromText(text);
+  const overviewSection = markdownSections.find((section) => /\b(?:overview|purpose|objective|scope|summary)\b/i.test(section.title));
+  const firstSentence = sourceSentencesFromText(overviewSection?.text || text)[0] ?? '';
+  const summary = clippedDisplayText(firstSentence
+    ? `${title}: ${firstSentence}`
+    : `${title}: DocuLens generated a source-derived briefing because the AI review provider was unavailable.`, 900);
+
+  return {
+    analysis: {
+      summary,
+      sections: markdownSections.slice(0, 12).map((section) => ({
+        title: clippedDisplayText(section.title, 120),
+        summary: clippedDisplayText(section.text, 360),
+      })),
+      entities: [],
+      requirements: [],
+      obligations: [],
+      deliverables: [],
+      risks: [],
+      uncertainties: [
+        'AI review was temporarily unavailable, so this briefing was derived from the selected source text.',
+      ],
+      recommendedQuestions: [
+        'What are the main requirements in this source?',
+        'What deliverables does this source request?',
+        'What risks or uncertainties should I review?',
+      ],
+    },
+    metadata: {
+      provider: 'local',
+      model: 'source-derived-fallback',
+      promptId: 'doculens.analysis',
+      promptVersion: PROMPT_VERSION,
+      contextStrategy: 'source_derived_fallback',
+      fallbackReason: 'provider_request_failed',
+    },
+  };
+}
+
+
 
 function secretsForProvider(secrets) {
   const providerSecrets = Object.fromEntries(secrets.map((value, index) => [`configuredSecret${index + 1}`, value]));
@@ -1075,14 +1118,19 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
   async function analyzeDocument({ currentUser, documentId }) {
     const document = await loadOwnedDocument({ documents, currentUser, documentId, resourceType: 'analysis', action: 'create' });
     const providerDocument = documentForProvider(document);
-    const providerResult = await aiProvider.analyzeDocument({
-      documentId: document.id,
-      userId: currentUser.id,
-      document: providerDocument,
-      prompt: { id: 'doculens.analysis', version: PROMPT_VERSION },
-      context: { strategy: 'full_document', thinkingMode: 'standard' },
-      secrets: secretsForProvider(secrets),
-    });
+    let providerResult;
+    try {
+      providerResult = await aiProvider.analyzeDocument({
+        documentId: document.id,
+        userId: currentUser.id,
+        document: providerDocument,
+        prompt: { id: 'doculens.analysis', version: PROMPT_VERSION },
+        context: { strategy: 'full_document', thinkingMode: 'standard' },
+        secrets: secretsForProvider(secrets),
+      });
+    } catch {
+      providerResult = sourceDerivedAnalysisResult(providerDocument);
+    }
     const analysis = normalizeAnalysisResult(providerResult, { secrets, document: providerDocument });
     const saved = await maybeSave(analysisStore, {
       documentId: document.id,
