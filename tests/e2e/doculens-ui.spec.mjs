@@ -394,7 +394,10 @@ async function expectContainedNarrowSourcePreview(page) {
   expect(layout.previewContained, layoutDebug).toBe(true);
   expect(layout.activeContained, layoutDebug).toBe(true);
   expect(layout.sourceRailContained, layoutDebug).toBe(true);
-  if (layout.briefingHeight > 0) expect(layout.briefingContained, layoutDebug).toBe(true);
+  if (layout.briefingHeight > 0) {
+    expect(layout.briefingContained, layoutDebug).toBe(true);
+    expect(Math.abs(layout.preview.height - layout.briefingHeight), layoutDebug).toBeLessThanOrEqual(8);
+  }
   expect(layout.preview.height, layoutDebug).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
   expect(layout.previewScrollRect, layoutDebug).toBeTruthy();
   expect(layout.previewScrollOverflowY, layoutDebug).toMatch(/auto|scroll/i);
@@ -1396,6 +1399,7 @@ test('narrow source workspace wraps long PDF filenames and keeps preview plus so
   await expect(byTestId(page, 'activeSource')).toContainText(/Full_Stack_AI_Engineer_Assessment_With_|Final_Final\.pdf/i);
   await expect(byTestId(page, 'evidencePanel')).toBeVisible();
   await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Backend, frontend, data privacy/i);
+  await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Section 28: Backend, frontend, data privacy/i);
 
   await expectContainedNarrowSourcePreview(page);
 

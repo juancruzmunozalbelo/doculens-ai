@@ -641,7 +641,8 @@ function AppStyles() {
       .source-search-input, .briefing-search-input { width: min(24rem, 100%); border: 1px solid #cbd5e1; border-radius: 999px; padding: 0.55rem 0.8rem; font: inherit; background: #ffffff; }
       .source-rail-list { display: flex; gap: 0.65rem; overflow-x: auto; overscroll-behavior-inline: contain; padding-bottom: 0.2rem; scroll-snap-type: x proximity; }
       .source-rail-list [data-testid="${TEST_IDS.sourceCard}"] { flex: 0 0 min(17rem, 78vw); scroll-snap-align: start; }
-      .briefing-scroll { max-height: min(48vh, 32rem); overflow: auto; padding-inline-end: 0.35rem; scroll-padding-top: 0.5rem; }
+      .review-briefing-panel { height: clamp(20rem, 52vh, 34rem); overflow: hidden; display: flex; flex-direction: column; align-self: start; }
+      .briefing-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow: auto; padding-inline-end: 0.35rem; scroll-padding-top: 0.5rem; }
       .briefing-scroll article { scroll-margin-top: 0.5rem; }
       .intake-grid { display: grid; grid-template-columns: minmax(320px, 0.95fr) minmax(320px, 1.05fr); grid-template-areas: "sources sources" "create preview"; gap: 1rem; align-items: start; }
       .intake-sources { grid-area: sources; min-width: 0; }
@@ -665,7 +666,7 @@ function AppStyles() {
       @keyframes pulse { from { transform: translateY(0); opacity: .45; } to { transform: translateY(-2px); opacity: 1; } }
       @keyframes card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
       @media (max-width: 1060px) { .workspace-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sources" "preview" "briefing" "chat"; } .workspace-sources { grid-template-columns: minmax(0, 1fr); } .intake-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sources" "create" "preview"; } .source-preview-column { grid-column: auto; } }
-      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .login-feature-grid { grid-template-columns: minmax(0, 1fr); } .app-header { align-items: flex-start !important; } .source-preview-column { height: clamp(18rem, 58vh, 32rem); } }
+      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .login-feature-grid { grid-template-columns: minmax(0, 1fr); } .app-header { align-items: flex-start !important; } .source-preview-column, .review-briefing-panel { height: clamp(18rem, 58vh, 32rem); } }
       @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; } }
       @media print {
         body { background: #ffffff !important; }
@@ -910,7 +911,7 @@ function ActiveSourceCard({ document }) {
 function SourcePreview({ document, activeEvidence }) {
   const excerptRef = useRef(null);
   const rawContent = document?.content ?? document?.text ?? '';
-  const overview = sanitizeDisplayText(rawContent, 'Choose a source to see the first excerpt.').slice(0, 1200);
+  const overview = sanitizeDisplayText(rawContent, 'Choose a source to see the source content.');
   const section = activeEvidence?.section ?? 'Source overview';
   const text = activeEvidence?.excerpt ?? overview;
   useEffect(() => {
@@ -962,7 +963,7 @@ function ReviewBriefing({ analysis, loading, onAnalyze }) {
     : cards;
   const hasVisibleBriefing = summaryMatches || visibleCards.length > 0;
   return (
-    <section data-testid={TEST_IDS.reviewBriefing} style={panelStyle} aria-labelledby="briefing-heading" aria-busy={busy}>
+    <section data-testid={TEST_IDS.reviewBriefing} className="review-briefing-panel" style={panelStyle} aria-labelledby="briefing-heading" aria-busy={busy}>
       <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
         <div>
           <p style={{ ...chipStyle, background: '#eef2ff', color: '#3730a3' }}>Briefing</p>
