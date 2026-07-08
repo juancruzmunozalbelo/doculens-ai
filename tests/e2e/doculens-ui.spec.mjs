@@ -370,6 +370,7 @@ async function expectContainedNarrowSourcePreview(page) {
     const active = toRect(select(testIds.activeSource));
     const sourceRail = toRect(select(testIds.sourceManagement));
     const briefing = toRect(select(testIds.reviewBriefing));
+    const sourceSearch = toRect(select(testIds.sourceSearch));
     const scrollStyle = previewScroll ? getComputedStyle(previewScroll) : null;
     const horizontallyContained = (rect) => !rect || (rect.left >= -2 && rect.right <= window.innerWidth + 2 && rect.width <= root.clientWidth + 2);
     return {
@@ -381,6 +382,7 @@ async function expectContainedNarrowSourcePreview(page) {
       activeContained: horizontallyContained(active),
       sourceRailContained: horizontallyContained(sourceRail),
       briefingContained: horizontallyContained(briefing),
+      sourceSearchContained: horizontallyContained(sourceSearch),
       briefingHeight: briefing?.height ?? 0,
       previewScrollRect: toRect(previewScroll),
       previewScrollClientHeight: previewScroll?.clientHeight ?? 0,
@@ -394,6 +396,7 @@ async function expectContainedNarrowSourcePreview(page) {
   expect(layout.previewContained, layoutDebug).toBe(true);
   expect(layout.activeContained, layoutDebug).toBe(true);
   expect(layout.sourceRailContained, layoutDebug).toBe(true);
+  expect(layout.sourceSearchContained, layoutDebug).toBe(true);
   if (layout.briefingHeight > 0) {
     expect(layout.briefingContained, layoutDebug).toBe(true);
     expect(Math.abs(layout.preview.height - layout.briefingHeight), layoutDebug).toBeLessThanOrEqual(8);
