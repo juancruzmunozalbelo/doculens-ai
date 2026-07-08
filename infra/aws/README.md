@@ -143,9 +143,9 @@ The stack can create empty secret containers when external ARNs are not supplied
 
 ## pgvector and hybrid retrieval prerequisites
 
-Do not claim AWS `pgvector` or `hybrid` retrieval until the target RDS PostgreSQL engine and database prove pgvector readiness. The local hashing embedding provider runs inside the application container and requires no external embedding API key, but PostgreSQL still must support the `vector` extension, `vector(384)` chunk column, cosine operator, and partial vector index.
+The current Terraform task definition does not expose `RETRIEVAL_BACKEND` or `EMBEDDING_*` variables, so the AWS demo deploys with the runtime default `lexical_fallback`. Do not claim AWS `pgvector` or `hybrid` retrieval unless operators explicitly extend the ECS task environment or override it outside Terraform to set vector retrieval, then prove the target RDS PostgreSQL engine and database support pgvector. The local hashing embedding provider runs inside the application container and requires no external embedding API key, but PostgreSQL still must support the `vector` extension, `vector(384)` chunk column, cosine operator, and partial vector index.
 
-Operator verification before enabling `RETRIEVAL_BACKEND=pgvector` or `RETRIEVAL_BACKEND=hybrid`:
+Operator verification before enabling or claiming `RETRIEVAL_BACKEND=pgvector` or `RETRIEVAL_BACKEND=hybrid`:
 
 ```bash
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "create extension if not exists vector;"

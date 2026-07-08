@@ -1,6 +1,6 @@
 # DocuLens AI
 
-DocuLens AI is a source-first AI document reviewer for the Full Stack AI Engineer assessment. It lets an authenticated reviewer choose one active source, generate a concise review briefing, ask grounded questions, inspect inline citations, and keep technical AI internals out of the primary reviewer path.
+DocuLens AI is the source-first solution to the Full Stack AI Engineer Assessment. It lets an authenticated reviewer choose one active source, generate a concise review briefing, ask grounded questions, inspect inline citations, and keep technical AI internals out of the primary reviewer path.
 
 This repository is public. Do not commit real secrets, `.env` files, Terraform state/plans, AWS credentials, MiniMax keys, JWT secrets, database passwords, raw sensitive document samples, or local harness folders.
 
@@ -19,7 +19,23 @@ The delivery documentation lives in the GitHub Wiki:
 - [Security and Secrets](https://github.com/juancruzmunozalbelo/doculens-ai/wiki/Security-and-Secrets)
 - [Troubleshooting](https://github.com/juancruzmunozalbelo/doculens-ai/wiki/Troubleshooting)
 
-Repo docs are the source of truth for the hybrid retrieval proof in this change. External wiki publication can follow later; reviewer claims about vector or hybrid retrieval should not be made from wiki pages until the README and `infra/aws/README.md` prerequisites above are reflected there.
+This README is self-contained for the challenger submission. The GitHub Wiki is aligned with it and expands the same delivery story without replacing the repo-local setup, retrieval, cost, AWS, security, and command details below.
+
+## Full Stack AI Engineer Assessment coverage
+
+DocuLens AI implements the uploaded-document/source Q&A path from the assessment: users submit text or a small text-based PDF, receive structured AI review output, and can re-ask grounded questions over the selected source.
+
+| Assessment requirement | Implemented evidence |
+| --- | --- |
+| Full-stack AI app for submitted content, AI interaction, and structured outputs | React reviewer UI in `apps/web/src/App.jsx`; Node API in `apps/api/src/server/index.mjs`; structured briefing and chat flow in `apps/api/src/server/chat/service.mjs`. |
+| Backend: Node.js, REST API, AI endpoint, persistence, authentication | Node REST routes under `/api/*`; MiniMax-backed analysis/chat endpoints; PostgreSQL repositories in `apps/api/src/server/postgresql/repositories.mjs`; JWT auth in `apps/api/src/server/auth/service.mjs`. |
+| AI architecture: separated prompt construction, model invocation, post-processing, provider abstraction, prompt configuration | `AIProvider` contract in `apps/api/src/server/ai/provider.mjs`; prompt registry/builder in `apps/api/src/server/ai/prompts/`; MiniMax transport and response safety in `apps/api/src/server/ai/minimax-provider.mjs`; prompt version `2026-07-07.1`. |
+| Prompt-injection, unsafe input, hallucination, and uncertainty handling | Evidence is wrapped as untrusted data, delimiters are escaped, secrets are redacted, unsupported/out-of-scope questions are refused or labeled, citations are validated, and answer states expose uncertainty/fallback reasons. |
+| Frontend: React, at least two pages, submission form, loading/error/empty/model status, refine or re-ask flow | Login, intake/add-source, and review workspace views in `apps/web/src/App.jsx`; paste/PDF/sample source forms; loading/error/empty states; trust metadata; retry/refine/overview actions. |
+| Data and architecture thinking: storage, retention, PII/logging/auditability, vector/RAG | PostgreSQL stores users, documents, chunks, embeddings, analyses, chat messages, citations, prompt/audit metadata; redaction is centralized; retrieval uses lexical fallback by default and optional pgvector/hybrid with local hashing. |
+| Evaluation and reliability thinking | Contract tests cover auth/ownership, chat, retrieval, prompt safety, logging redaction, pgvector readiness, PDF upload, cost estimation, workflows, and eval regression fixtures under `tests/`. |
+| Infrastructure: AWS, IaC, secrets, config/code separation, scaling constraints | Terraform demo stack in `infra/aws`; Docker Compose and `Dockerfile.aws`; AWS Secrets Manager/OIDC workflow guidance; bounded MiniMax budgets and demo-grade ECS/Fargate deployment notes. |
+| Bonus coverage | Cost estimates for 1k/10k/100k requests are documented below; vector/RAG proof is implemented. Streaming, LLM tool/function calling, and queues/workers are explicitly out of scope. |
 
 ## What is implemented
 
@@ -36,6 +52,30 @@ Repo docs are the source of truth for the hybrid retrieval proof in this change.
 - Local Docker Compose path and single-container AWS image path.
 - Terraform demo stack for ECS Fargate, ALB, RDS PostgreSQL, Secrets Manager, CloudWatch, IAM, and security groups.
 - GitHub Actions required CI gates, AWS static validation, AWS container build smoke, release/deploy workflow, and rollback workflow.
+
+## Architecture and AI decisions
+
+- The product shape is intentionally narrow: one authenticated reviewer, one active source at a time, a structured briefing, and source-grounded chat with citations. This keeps the assessment focused on a complete vertical slice instead of a broad document-management platform.
+- The backend keeps prompt construction, model invocation, and response post-processing separate. `AIProvider` defines the switchable provider boundary, while the current live provider is MiniMax M3 behind budget checks and a fail-closed unavailable-provider path.
+- Prompts are versioned in code and built from sanitized document/chunk evidence. Document text is always treated as untrusted data: it cannot override system/developer policy, reveal hidden prompts, forge citations, or change logging/provider behavior.
+- Retrieval defaults to `lexical_fallback` so the app remains honest without vector prerequisites. When configured, `pgvector` and `hybrid` use repository-backed PostgreSQL search with local deterministic hashing embeddings, and fall back with explicit reasons if prerequisites are missing.
+- The primary reviewer UI favors usable answer states, citations, and evidence controls. Provider/model, prompt version, retrieval mode, and fallback reason remain available in the trust panel for auditability without making internals the main workflow.
+
+## Data storage, retention, PII, logging, and auditability
+
+- Stored application data includes user email/display name/password hash, document text and metadata, normalized chunks, local embedding vectors and metadata, structured analyses, chat messages, citations, prompt identifiers/versions, token estimates, retrieval metadata, and safe provider/model audit fields.
+- Secrets are not stored in the repo. Runtime secrets come from local environment variables or AWS Secrets Manager; the local hashing embedding path needs no embedding-provider secret.
+- Uploaded documents and AI outputs are retained in the configured PostgreSQL database; reviewer deletion removes the source from owner-scoped active views, while hard deletion, database reset, or demo-stack destroy is required for physical removal. The current app does not implement an automatic time-based retention policy.
+- Schema foreign keys support cascade cleanup when users/documents/messages/chunks are hard-deleted. Audit metadata is designed to keep prompt identifiers, versions, provider/model, retrieval, citation, and token fields without storing raw full prompts or raw provider payloads as the audit record.
+- Treat all uploaded documents as potentially sensitive. Do not commit real PII or confidential samples. Central redaction removes configured secrets, database URLs/passwords, bearer tokens, MiniMax keys, raw-document canaries, full-prompt canaries, provider-response canaries, and stack traces from log/display paths.
+- Local logs are structured console output. The AWS demo sends app logs to CloudWatch with demo retention configured in Terraform; production would need explicit retention, access-review, incident/audit, and deletion policies.
+
+## Evaluation, reliability, and wrong-answer handling
+
+- Output quality is measured by source-grounding rather than free-form confidence: answers should cite retrieved chunks, expose uncertainty/fallback state, avoid unsupported claims, and keep raw provider internals out of reviewer-facing text.
+- Regression protection lives in targeted contract tests and fixtures: retrieval/eval regression, chat API behavior, prompt safety, citation validation, redaction, ownership, pgvector readiness, PDF upload, cost estimation, and workflow checks under `tests/`.
+- After prompt/model changes, rerun the affected contract suites and compare the golden assessment fixture behavior before reviewer claims are updated. The README cost/retrieval claims should remain tied to those verified contracts.
+- Wrong answers in production should be handled as auditable incidents: preserve the source, question, citations, prompt version, provider/model, retrieval mode, fallback reason, and token metadata; let the reviewer retry/refine or ask an overview; then patch prompts/retrieval/tests before re-enabling a claim.
 
 
 ## AI usage cost estimation
@@ -66,7 +106,7 @@ Representative scenarios:
 
 Budget guardrails already bound live spend before MiniMax transport invocation:
 
-- The server default MiniMax budget caps live calls at 32, input tokens at 8,000, context tokens at 8,000, output tokens at 800, timeout at 30,000 ms, retries at 1, concurrency at 2, and max estimated live-call cost at $1.
+- The server default MiniMax budget caps live calls at 32, input tokens at 8,000, context tokens at 8,000, output-token budget ceiling at 6,000, timeout at 30,000 ms, retries at 1, concurrency at 2, and max estimated live-call cost at $1. Normal chat requests default to 800 output tokens; full-document analysis can request up to 6,000.
 - The provider rejects exhausted live-call budgets, over-limit input/context tokens, over-limit output tokens, exceeded estimated-cost budgets, invalid timeout/retry budgets, and concurrency overflow before the network call is made.
 - Over-budget requests fail closed before MiniMax transport invocation instead of silently making an over-budget live call.
 
@@ -75,6 +115,7 @@ Caveats:
 - Actual provider billing can vary by MiniMax tokenizer behavior, document length, retrieved chunk volume, answer length, retry behavior, provider pricing changes, cache usage, service tier, long-context routing, failed requests, and unsupported requests.
 - The estimates use representative averages and repo token-estimation heuristics for planning; they are not billing reconciliation.
 - Streaming responses, LLM tool/function calling, and queue/worker processing remain out of scope for this assessment implementation.
+
 ## Local quick start
 
 Prerequisites:
@@ -196,7 +237,7 @@ Terraform lives in `infra/aws`. The stack is disposable demo-grade infrastructur
 
 See [AWS Deployment](https://github.com/juancruzmunozalbelo/doculens-ai/wiki/AWS-Deployment) for release/deploy, rollback, destroy, cost, and production-gap notes.
 
-For AWS vector or hybrid retrieval, the RDS engine must support pgvector and the database must pass the extension/vector-column readiness checks before deploy notes or reviewer demos claim an effective `pgvector` or `hybrid` backend. See `infra/aws/README.md` for operator commands.
+The current Terraform AWS demo does not expose `RETRIEVAL_BACKEND` or `EMBEDDING_*` task environment variables, so the deployed task runs `lexical_fallback` by default. If operators extend the ECS task environment or override it outside Terraform to set `pgvector`/`hybrid`, the RDS engine and database must pass pgvector/vector-column readiness checks and application metadata must prove an effective vector backend before deploy notes or reviewer demos claim it. See `infra/aws/README.md` for operator checks.
 
 ## Security
 
@@ -204,14 +245,17 @@ Secrets are not stored in the repository. GitHub Actions uses OIDC for AWS acces
 
 See [Security and Secrets](https://github.com/juancruzmunozalbelo/doculens-ai/wiki/Security-and-Secrets) for details.
 
-## Current limitations
+## Public limitations
 
 - Live MiniMax chat/analysis proof requires a real `MINIMAX_API_KEY` and explicit opt-in.
+- Streaming responses, LLM tool/function calling, and queue/worker processing remain out of scope for this assessment implementation.
+- PDF support is for small text-based PDFs through conversion; OCR/scanned-document extraction is not claimed.
 - Local vector/hybrid retrieval uses deterministic no-cost `local_hashing` embeddings inside the Node container. It proves pgvector/hybrid wiring and fallback honesty, but it is not hosted/deep semantic embedding quality.
 - Existing documents ingested before the vector migration may report `missing_chunk_embeddings` until reingested or backfilled.
-- AWS vector/hybrid demos require an RDS PostgreSQL version with pgvector available and explicit operator verification before claiming an effective vector backend.
+- The app explains retention and audit tradeoffs, but it does not implement automatic document TTLs, production DLP, enterprise audit exports, or human review queues.
+- AWS vector/hybrid demos require an ECS task environment that sets retrieval/embedding variables, an RDS PostgreSQL version with pgvector available, and explicit operator verification before claiming an effective vector backend.
 - AWS `terraform apply` requires protected `aws-demo` environment approval, a pushed image digest, and populated external secret ARNs.
-- The AWS stack is demo-grade, not production-ready.
+- The AWS stack is disposable demo-grade infrastructure, not production-ready.
 
 ## OpenSpec
 

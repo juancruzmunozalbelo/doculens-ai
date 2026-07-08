@@ -563,6 +563,64 @@ test('document AI analysis derives assessment requirements and deliverables when
   );
 });
 
+test('document AI analysis falls back to source-derived assessment briefing when provider transport fails', async () => {
+  const { createDocumentAiService } = await importRequired(
+    'apps/api/src/server/chat/service.mjs',
+    ['createDocumentAiService'],
+    'Document AI service',
+  );
+  const analysisRepository = createAnalysisRepositoryFake();
+  const aiProvider = {
+    analyzeCalls: [],
+    answerCalls: [],
+    async analyzeDocument(payload) {
+      this.analyzeCalls.push(payload);
+      throw new Error('Request failed providerResponseId=raw-123 SYSTEM_POLICY secret');
+    },
+    async answerQuestion(payload) {
+      this.answerCalls.push(payload);
+      assert.fail('analysis fallback must not call the chat provider path');
+    },
+  };
+  const documentAi = createDocumentAiService({
+    documents: createDocumentServiceFake(assessmentDocument),
+    aiProvider,
+    retrievalProvider: createRetrievalProviderFake({ chunks: [] }),
+    analysisRepository,
+    config: testConfig(),
+  });
+
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await documentAi.analyzeDocument({
+      currentUser: owner,
+      documentId: assessmentDocument.id,
+    });
+  }, 'provider transport failure must not surface as a thrown analysis error');
+
+  assert.equal(aiProvider.analyzeCalls.length, 1, 'analysis must attempt the provider before using a source-derived fallback');
+  assert.equal(aiProvider.answerCalls.length, 0, 'analysis fallback must not cross into the chat provider contract');
+  const analysis = result.analysis;
+  assert.match(analysis.summary, /Full Stack AI Engineer Assessment|AI-powered full-stack/i, 'fallback summary must be useful source-derived assessment prose');
+  assert.ok(analysis.requirements.length > 0, 'fallback analysis must derive non-empty requirements from the assessment source');
+  assert.ok(analysis.deliverables.length > 0, 'fallback analysis must derive non-empty deliverables from the assessment source');
+  const requirementText = analysis.requirements.map((item) => `${item.category ?? ''} ${item.text}`).join('\n');
+  const deliverableText = analysis.deliverables.map((item) => `${item.category ?? ''} ${item.text}`).join('\n');
+  assert.match(requirementText, /REST API|LLM|JWT|React|AWS/i, 'fallback requirements must preserve concrete assessment requirements');
+  assert.match(deliverableText, /Git repository|README|run/i, 'fallback deliverables must preserve concrete assessment deliverables');
+  assert.equal(analysis.metadata.fallbackReason, 'provider_request_failed', 'fallback metadata must explain the provider transport failure safely');
+  assert.equal(analysis.metadata.provider, 'local', 'fallback metadata provider must identify local source-derived analysis');
+  assert.equal(analysis.metadata.model, 'source-derived-fallback', 'fallback metadata model must identify source-derived fallback analysis');
+  assert.equal(analysis.metadata.contextStrategy, 'source_derived_fallback', 'fallback metadata must identify the source-derived context strategy');
+  assert.deepEqual(analysisRepository.saved[0].analysis, analysis, 'persisted fallback analysis must match the returned analysis');
+  assert.deepEqual(analysisRepository.saved[0].metadata, analysis.metadata, 'persisted fallback metadata must match the returned analysis metadata');
+  assert.doesNotMatch(
+    JSON.stringify(analysis),
+    /Request failed providerResponseId=raw-123 SYSTEM_POLICY secret|Request failed|providerResponseId|raw-123|SYSTEM_POLICY|rawProvider/i,
+    'fallback analysis must not leak raw provider errors or provider payload canaries',
+  );
+});
+
 test('analysis and chat create flows authorize child resources before providers or persistence', async (t) => {
   const events = [];
   const documents = createDocumentServiceFake(ownedDocument, { events });
