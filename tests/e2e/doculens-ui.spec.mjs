@@ -1508,6 +1508,7 @@ test('assessment PDF golden path uploads fixture, opens source metadata, generat
   await expect(byTestId(page, 'activeSource').getByTestId(TEST_IDS.sourceStatus)).toContainText(/Ready/i);
   await expect(byTestId(page, 'evidencePanel')).toContainText(/Source preview|Full Stack AI Engineer Assessment/i);
   await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Backend requirements|Frontend requirements|Data, privacy/i);
+  await expect(byTestId(page, 'evidenceExcerpt')).not.toContainText(/Source excerpt unavailable/i);
 
   await byTestId(page, 'documentAnalyze').click();
   const briefing = byTestId(page, 'reviewBriefing');
