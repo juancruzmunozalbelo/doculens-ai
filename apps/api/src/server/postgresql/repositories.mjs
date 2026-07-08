@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { BACKEND_PROVENANCE } from '../retrieval/utils.mjs';
 
 function contentSha256(content) {
   return createHash('sha256').update(content).digest('hex');
@@ -7,6 +8,48 @@ function contentSha256(content) {
 
 function tokenEstimate(content) {
   return String(content).split(/\s+/).filter(Boolean).length;
+}
+
+const VECTOR_DIMENSIONS = 384;
+const VECTOR_PROVIDER = 'local_hashing';
+const VECTOR_MODEL = 'doculens-local-hashing-v1';
+const HYBRID_VECTOR_WEIGHT = 0.75;
+const HYBRID_LEXICAL_WEIGHT = 0.20;
+const HYBRID_HEADING_WEIGHT = 0.05;
+
+
+function vectorLiteral(embedding, expectedDimensions = VECTOR_DIMENSIONS) {
+  if (!Array.isArray(embedding) || embedding.length !== expectedDimensions) {
+    const error = new Error(`embedding must be a ${expectedDimensions}-dimension vector`);
+    error.code = 'EMBEDDING_DIMENSION_MISMATCH';
+    throw error;
+  }
+
+  return JSON.stringify(embedding.map((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      const error = new Error('embedding contains a non-finite value');
+      error.code = 'EMBEDDING_INVALID_VALUE';
+      throw error;
+    }
+    return numeric;
+  }));
+}
+
+function chunkEmbeddingMetadata(chunk) {
+  return {
+    provider: chunk.embeddingProvider ?? chunk.embedding_provider ?? null,
+    model: chunk.embeddingModel ?? chunk.embedding_model ?? null,
+    dimensions: chunk.embeddingDimensions ?? chunk.embedding_dimensions ?? null,
+    status: chunk.embeddingStatus ?? chunk.embedding_status ?? (Array.isArray(chunk.embedding) ? 'ready' : null),
+    metadata: chunk.embeddingMetadata ?? chunk.embedding_metadata ?? {},
+  };
+}
+
+function missingChunkEmbeddingsError() {
+  const error = new Error('missing chunk embeddings for repository preferred retrieval');
+  error.code = 'MISSING_CHUNK_EMBEDDINGS';
+  return error;
 }
 
 function payloadVariable(payload) {
@@ -123,6 +166,12 @@ const chunkJson = `json_build_object(
   'content', c.content,
   'tokenEstimate', c.token_estimate,
   'retrievalMetadata', c.retrieval_metadata,
+  'embeddingProvider', c.embedding_provider,
+  'embeddingModel', c.embedding_model,
+  'embeddingDimensions', c.embedding_dimensions,
+  'embeddingStatus', c.embedding_status,
+  'embeddingMetadata', c.embedding_metadata,
+  'embeddedAt', c.embedded_at,
   'createdAt', c.created_at
 )`;
 
@@ -189,9 +238,9 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
            select lower(data->>'email'), data->>'passwordHash', data->>'displayName'
            from input
            on conflict (email) do nothing
-           returning ${userJson} as user
+           returning ${userJson} as created_user
          )
-         select coalesce((select json_build_object('user', user) from inserted), '{"user":null}'::json);`,
+         select coalesce((select json_build_object('user', inserted.created_user) from inserted), '{"user":null}'::json);`,
         { email, passwordHash, displayName },
       );
       if (!row?.user) {
@@ -363,6 +412,20 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
         }
         seen.add(chunk.chunkId);
       }
+      const preparedChunks = chunks.map((chunk) => {
+        const metadata = chunkEmbeddingMetadata(chunk);
+        const hasEmbedding = Array.isArray(chunk.embedding);
+        return {
+          ...chunk,
+          embedding: hasEmbedding ? vectorLiteral(chunk.embedding, metadata.dimensions ?? VECTOR_DIMENSIONS) : null,
+          embeddingProvider: metadata.provider ?? (hasEmbedding ? VECTOR_PROVIDER : null),
+          embeddingModel: metadata.model ?? (hasEmbedding ? VECTOR_MODEL : null),
+          embeddingDimensions: metadata.dimensions ?? (hasEmbedding ? VECTOR_DIMENSIONS : null),
+          embeddingStatus: metadata.status ?? (hasEmbedding ? 'ready' : null),
+          embeddingMetadata: metadata.metadata ?? {},
+        };
+      });
+
 
       const authorized = await documentsRepository.findByIdForUser({ documentId, userId });
       if (!authorized) {
@@ -383,7 +446,11 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
              jsonb_array_elements(data->'chunks') as chunk
            from input
          ), inserted as (
-           insert into document_chunks (document_id, chunk_id, chunk_index, heading_path, content, content_sha256, token_estimate, retrieval_metadata)
+           insert into document_chunks (
+             document_id, chunk_id, chunk_index, heading_path, content, content_sha256,
+             token_estimate, retrieval_metadata, embedding, embedding_provider, embedding_model,
+             embedding_dimensions, embedding_status, embedding_metadata, embedded_at
+           )
            select
              chunk_input.document_id,
              chunk->>'chunkId',
@@ -392,14 +459,55 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
              chunk->>'content',
              encode(digest(chunk->>'content', 'sha256'), 'hex'),
              (chunk->>'tokenEstimate')::integer,
-             coalesce(chunk->'retrievalMetadata', '{}'::jsonb)
+             coalesce(chunk->'retrievalMetadata', '{}'::jsonb),
+             nullif(chunk->>'embedding', '')::vector,
+             chunk->>'embeddingProvider',
+             chunk->>'embeddingModel',
+             nullif(chunk->>'embeddingDimensions', '')::integer,
+             chunk->>'embeddingStatus',
+             coalesce(chunk->'embeddingMetadata', '{}'::jsonb),
+             case when chunk ? 'embedding' and chunk->>'embedding' is not null then now() else null end
            from chunk_input
            returning *
+         ), coverage as (
+           select
+             document_id,
+             count(*)::integer as total_chunks,
+             count(*) filter (where embedding is not null)::integer as embedded_chunks,
+             max(embedding_provider) filter (where embedding is not null) as provider,
+             max(embedding_model) filter (where embedding is not null) as model,
+             max(embedding_dimensions) filter (where embedding is not null) as dimensions
+           from document_chunks
+           where document_id = (select document_id from chunk_input limit 1)
+           group by document_id
+         ), updated_document as (
+           update documents d
+           set embedding_provider = coverage.provider,
+               embedding_model = coverage.model,
+               embedding_dimensions = coverage.dimensions,
+               embedding_status = case
+                 when coverage.total_chunks = 0 then null
+                 when coverage.embedded_chunks = coverage.total_chunks then 'ready'
+                 when coverage.embedded_chunks > 0 then 'partial'
+                 else null
+               end,
+               embedding_chunks_total = coverage.total_chunks,
+               embedding_chunks_embedded = coverage.embedded_chunks,
+               embedding_coverage = jsonb_build_object(
+                 'totalChunks', coverage.total_chunks,
+                 'embeddedChunks', coverage.embedded_chunks,
+                 'missingChunks', greatest(coverage.total_chunks - coverage.embedded_chunks, 0)
+               ),
+               embedding_updated_at = case when coverage.embedded_chunks > 0 then now() else d.embedding_updated_at end,
+               updated_at = now()
+           from coverage
+           where d.id = coverage.document_id
+           returning true
          )
          select coalesce(json_agg(${chunkJson} order by c.chunk_index), '[]'::json)
          from inserted c
          join documents d on d.id = c.document_id;`,
-        { documentId, chunks },
+        { documentId, chunks: preparedChunks },
       );
     },
 
@@ -417,6 +525,244 @@ export function createPostgreSqlRepositories({ databaseUrl } = {}) {
            and d.status <> 'failed'
            and d.deleted_at is null;`,
         { documentId, userId },
+      );
+    },
+
+    async checkVectorReadiness({ expectedDimensions = VECTOR_DIMENSIONS, strict = false } = {}) {
+      const readiness = await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), expected as (
+           select (data->>'expectedDimensions')::integer as dimensions from input
+         ), checks as (
+           select
+             exists(select 1 from pg_extension where extname = 'vector') as extension_installed,
+             exists(select 1 from pg_type where typname = 'vector') as vector_type_available,
+             exists(
+               select 1
+               from pg_operator op
+               join pg_type left_type on left_type.oid = op.oprleft
+               join pg_type right_type on right_type.oid = op.oprright
+               where op.oprname = '<=>'
+                 and left_type.typname = 'vector'
+                 and right_type.typname = 'vector'
+             ) as cosine_operator_available,
+             exists(
+               select 1
+               from pg_attribute attr
+               join pg_class rel on rel.oid = attr.attrelid
+               join pg_namespace nsp on nsp.oid = rel.relnamespace
+               join expected on true
+               where nsp.nspname = 'public'
+                 and rel.relname = 'document_chunks'
+                 and attr.attname = 'embedding'
+                 and format_type(attr.atttypid, attr.atttypmod) = ('vector(' || expected.dimensions::text || ')')
+                 and not attr.attnotnull
+             ) as column_dimension_ready,
+             exists(
+               select 1
+               from pg_indexes
+               where schemaname = 'public'
+                 and tablename = 'document_chunks'
+                 and indexname = 'document_chunks_embedding_hnsw_idx'
+                 and indexdef ilike '%embedding%'
+                 and indexdef ilike '%vector_cosine_ops%'
+                 and indexdef ilike '%where (embedding is not null)%'
+             ) as index_ready
+         )
+         select json_build_object(
+           'extensionInstalled', extension_installed,
+           'vectorTypeAvailable', vector_type_available,
+           'cosineOperatorAvailable', cosine_operator_available,
+           'columnDimensionReady', column_dimension_ready,
+           'indexReady', index_ready,
+           'ready', extension_installed and vector_type_available and cosine_operator_available and column_dimension_ready and index_ready
+         )
+         from checks;`,
+        { expectedDimensions },
+      );
+      if (!readiness?.ready && strict) {
+        const failed = Object.entries(readiness ?? {})
+          .filter(([key, value]) => key !== 'ready' && value === false)
+          .map(([key]) => key);
+        const error = new Error(`pgvector readiness check failed: ${failed.join(', ')}`);
+        error.code = 'PGVECTOR_PREFLIGHT_FAILED';
+        error.readiness = readiness;
+        throw error;
+      }
+      return readiness;
+    },
+
+    async embeddingCoverageForDocumentForUser({ documentId, userId }) {
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         )
+         select coalesce((
+           select json_build_object(
+             'totalChunks', count(*)::integer,
+             'embeddedChunks', count(*) filter (where c.embedding is not null)::integer
+           )
+           from document_chunks c
+           join documents d on d.id = c.document_id
+           where c.document_id = (input.data->>'documentId')::uuid
+             and d.user_id = (input.data->>'userId')::uuid
+             and d.status <> 'failed'
+             and d.deleted_at is null
+         ), json_build_object('totalChunks', 0, 'embeddedChunks', 0))
+         from input;`,
+        { documentId, userId },
+      );
+    },
+
+    async searchByVectorForDocumentForUser({ documentId, userId, embedding, limit }) {
+      await this.checkVectorReadiness({ expectedDimensions: VECTOR_DIMENSIONS, strict: true });
+      const coverage = await this.embeddingCoverageForDocumentForUser({ documentId, userId });
+      if ((coverage?.totalChunks ?? 0) > 0 && coverage.embeddedChunks < coverage.totalChunks) {
+        throw missingChunkEmbeddingsError();
+      }
+      if ((coverage?.totalChunks ?? 0) === 0) {
+        return [];
+      }
+
+      const boundedLimit = Number.isInteger(limit) && limit > 0 ? limit : 4;
+      const queryEmbedding = vectorLiteral(embedding);
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), query_vector as (
+           select
+             (data->>'embedding')::vector as embedding,
+             greatest(1, (data->>'limit')::integer) as result_limit
+           from input
+         ), ranked as (
+           select c.*, c.embedding <=> query_vector.embedding as distance
+           from document_chunks c
+           join documents d on d.id = c.document_id
+           join query_vector on true
+           join input on true
+           where c.document_id = (input.data->>'documentId')::uuid
+             and d.user_id = (input.data->>'userId')::uuid
+             and d.status <> 'failed'
+             and d.deleted_at is null
+             and c.embedding is not null
+           order by distance asc, c.chunk_index asc
+           limit (select result_limit from query_vector)
+         )
+         select coalesce(json_agg(json_build_object(
+           'id', c.id::text,
+           'documentId', c.document_id::text,
+           'userId', d.user_id::text,
+           'chunkId', c.chunk_id,
+           'chunkIndex', c.chunk_index,
+           'headingPath', c.heading_path,
+           'content', c.content,
+           'tokenEstimate', c.token_estimate,
+           'normalizedScore', round(greatest(0, least(1, 1 - c.distance))::numeric, 3)::float,
+           'vectorScore', round(greatest(0, least(1, 1 - c.distance))::numeric, 3)::float,
+           'retrievalMetadata', c.retrieval_metadata || jsonb_build_object(
+             'backendProvenance', '${BACKEND_PROVENANCE.postgresqlRepository}',
+             'scoreComponents', jsonb_build_object(
+               'vector', round(greatest(0, least(1, 1 - c.distance))::numeric, 3)::float
+             )
+           ),
+           'createdAt', c.created_at
+         ) order by c.distance asc, c.chunk_index asc), '[]'::json)
+         from ranked c
+         join documents d on d.id = c.document_id;`,
+        { documentId, userId, embedding: queryEmbedding, limit: boundedLimit },
+      );
+    },
+
+    async searchHybridForDocumentForUser({ documentId, userId, query: searchText, embedding, limit }) {
+      await this.checkVectorReadiness({ expectedDimensions: VECTOR_DIMENSIONS, strict: true });
+      const coverage = await this.embeddingCoverageForDocumentForUser({ documentId, userId });
+      if ((coverage?.totalChunks ?? 0) > 0 && coverage.embeddedChunks < coverage.totalChunks) {
+        throw missingChunkEmbeddingsError();
+      }
+      if ((coverage?.totalChunks ?? 0) === 0) {
+        return [];
+      }
+
+      const boundedLimit = Number.isInteger(limit) && limit > 0 ? limit : 4;
+      const queryEmbedding = vectorLiteral(embedding);
+      return await query(
+        `with input as (
+           select convert_from(decode(:'payload', 'base64'), 'utf8')::jsonb data
+         ), query_terms as (
+           select
+             (data->>'embedding')::vector as embedding,
+             greatest(1, (data->>'limit')::integer) as result_limit,
+             array(
+               select distinct term
+               from regexp_split_to_table(lower(coalesce(data->>'query', '')), '[^a-z0-9-]+') term
+               where length(term) > 2
+             ) as terms
+           from input
+         ), scored as (
+           select
+             c.*,
+             c.embedding <=> query_terms.embedding as distance,
+             greatest(0, least(1, 1 - (c.embedding <=> query_terms.embedding))) as vector_score,
+             case when cardinality(query_terms.terms) = 0 then 0 else (
+               select count(*)::float / cardinality(query_terms.terms)
+               from unnest(query_terms.terms) term
+               where lower(array_to_string(c.heading_path, ' ') || ' ' || c.content) like '%' || term || '%'
+             ) end as lexical_score,
+             case when cardinality(query_terms.terms) = 0 then 0 else (
+               select count(*)::float / cardinality(query_terms.terms)
+               from unnest(query_terms.terms) term
+               where lower(array_to_string(c.heading_path, ' ')) like '%' || term || '%'
+             ) end as heading_match_score
+           from document_chunks c
+           join documents d on d.id = c.document_id
+           join query_terms on true
+           join input on true
+           where c.document_id = (input.data->>'documentId')::uuid
+             and d.user_id = (input.data->>'userId')::uuid
+             and d.status <> 'failed'
+             and d.deleted_at is null
+             and c.embedding is not null
+         ), ranked as (
+           select
+             scored.*,
+             greatest(0, least(1,
+               (${HYBRID_VECTOR_WEIGHT} * vector_score) +
+               (${HYBRID_LEXICAL_WEIGHT} * lexical_score) +
+               (${HYBRID_HEADING_WEIGHT} * heading_match_score)
+             )) as hybrid_score
+           from scored
+           order by hybrid_score desc, chunk_index asc
+           limit (select result_limit from query_terms)
+         )
+         select coalesce(json_agg(json_build_object(
+           'id', c.id::text,
+           'documentId', c.document_id::text,
+           'userId', d.user_id::text,
+           'chunkId', c.chunk_id,
+           'chunkIndex', c.chunk_index,
+           'headingPath', c.heading_path,
+           'content', c.content,
+           'tokenEstimate', c.token_estimate,
+           'normalizedScore', round(c.hybrid_score::numeric, 3)::float,
+           'vectorScore', round(c.vector_score::numeric, 3)::float,
+           'lexicalScore', round(greatest(0, least(1, c.lexical_score))::numeric, 3)::float,
+           'headingMatchScore', round(greatest(0, least(1, c.heading_match_score))::numeric, 3)::float,
+           'hybridScore', round(c.hybrid_score::numeric, 3)::float,
+           'retrievalMetadata', c.retrieval_metadata || jsonb_build_object(
+             'backendProvenance', '${BACKEND_PROVENANCE.postgresqlRepository}',
+             'scoreComponents', jsonb_build_object(
+               'vector', round(c.vector_score::numeric, 3)::float,
+               'lexical', round(greatest(0, least(1, c.lexical_score))::numeric, 3)::float,
+               'heading', round(greatest(0, least(1, c.heading_match_score))::numeric, 3)::float,
+               'hybrid', round(c.hybrid_score::numeric, 3)::float
+             )
+           ),
+           'createdAt', c.created_at
+         ) order by c.hybrid_score desc, c.chunk_index asc), '[]'::json)
+         from ranked c
+         join documents d on d.id = c.document_id;`,
+        { documentId, userId, query: searchText, embedding: queryEmbedding, limit: boundedLimit },
       );
     },
 

@@ -129,7 +129,7 @@ test('test:e2e lists the canonical Playwright reviewer flow for analysis, chat, 
       {
         task: '7.13',
         contract: 'canonical reviewer flow is present',
-        pattern: /reviewer flow logs in, submits a document, analyzes it, and renders grounded chat evidence/i,
+        pattern: /source-first notebook creates a ready active source, offers briefing and starter questions before analysis, and keeps chat scoped to the source/i,
       },
       {
         task: '7.13',

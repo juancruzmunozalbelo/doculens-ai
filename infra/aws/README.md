@@ -6,8 +6,8 @@ This directory defines a tiny disposable AWS demo stack for the assessment accou
 
 - Public ALB on port 80 with `/health` target checks.
 - One ECS Fargate service running one DocuLens app container built from `Dockerfile.aws`.
-- RDS PostgreSQL 16 with `publicly_accessible = false`; database ingress allows port 5432 only from the app task security group.
-- Secrets Manager containers for `DATABASE_URL`, `JWT_SECRET`, and `MINIMAX_API_KEY`, or bindings to externally supplied secret ARNs.
+- RDS PostgreSQL 16 with `publicly_accessible = false`; database ingress allows port 5432 only from the app task security group. Vector/hybrid retrieval claims additionally require pgvector support verified before deployment evidence is accepted.
+- Secrets Manager containers for `DATABASE_URL`, `JWT_SECRET`, and `MINIMAX_API_KEY`, or bindings to externally supplied secret ARNs. The local hashing embedding path does not require an embedding-provider secret.
 - CloudWatch log group for app logs.
 - Bounded demo defaults: desired task count 1, CPU 512, memory 1024 MiB, 20 GiB single-AZ RDS, no NAT gateway, deletion protection disabled, final snapshot skipped.
 
@@ -140,6 +140,36 @@ Terraform intentionally does not manage secret values. Do not put JWT secrets, d
 The automated deploy path requires external populated secret ARNs for `DATABASE_URL`, `JWT_SECRET`, and `MINIMAX_API_KEY`. The workflow runs `secretsmanager:GetSecretValue` for each ARN, requires an `AWSCURRENT` non-empty string, and logs only presence/status. It must not print secret payloads.
 
 The stack can create empty secret containers when external ARNs are not supplied for local/manual experiments, but that mode is not sufficient for automated deploy success.
+
+## pgvector and hybrid retrieval prerequisites
+
+Do not claim AWS `pgvector` or `hybrid` retrieval until the target RDS PostgreSQL engine and database prove pgvector readiness. The local hashing embedding provider runs inside the application container and requires no external embedding API key, but PostgreSQL still must support the `vector` extension, `vector(384)` chunk column, cosine operator, and partial vector index.
+
+Operator verification before enabling `RETRIEVAL_BACKEND=pgvector` or `RETRIEVAL_BACKEND=hybrid`:
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "create extension if not exists vector;"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "select extname from pg_extension where extname = 'vector';"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "select 'embedding' as column_name, atttypid::regtype::text as type_name from pg_attribute where attrelid = 'document_chunks'::regclass and attname = 'embedding';"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "select indexname from pg_indexes where tablename = 'document_chunks' and indexname = 'document_chunks_embedding_hnsw_idx';"
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "select '[1,0,0]'::vector <=> '[0,1,0]'::vector as cosine_distance;"
+```
+
+Expected evidence:
+
+- Extension check returns `vector`.
+- `document_chunks.embedding` reports `vector`.
+- Partial vector index `document_chunks_embedding_hnsw_idx` exists after migrations.
+- Cosine-distance operator query succeeds.
+- Application/eval metadata reports both configured and effective backend; effective `pgvector` or `hybrid` is valid only with `postgresql_repository` provenance.
+
+Safe fallback modes:
+
+- `RETRIEVAL_BACKEND=lexical_fallback` is always allowed and reports fallback reason `retrieval_disabled`.
+- If vector is configured but pgvector readiness, chunk embeddings, or repository preferred search is unavailable, the app must report effective `lexical_fallback` with `vector_unavailable`, `missing_chunk_embeddings`, or `preferred_backend_unavailable` rather than claiming vector retrieval.
+- `EMBEDDING_STRICT=false` preserves lexical usability when local embedding work fails. `EMBEDDING_STRICT=true` fails closed with an operator-readable prerequisite/configuration error.
+
+Production gap: this demo uses no-cost in-container `local_hashing` embeddings (`doculens-local-hashing-v1`, 384 dimensions). It proves vector storage/search, tenancy-safe SQL, hybrid scoring, and fallback honesty; it does not claim hosted MiniMax-M3 embeddings or production-grade semantic embedding quality.
 
 ## Plan, approval, apply, and health smoke
 

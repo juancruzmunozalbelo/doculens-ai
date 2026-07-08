@@ -6,7 +6,12 @@ import { getPromptDefinition, PROMPT_VERSION } from './prompts/registry.mjs';
 const DEFAULT_BASE_URL = 'https://api.minimax.io/v1';
 const DEFAULT_MODEL = 'MiniMax-M3';
 const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_MAX_OUTPUT_TOKENS = 800;
+const DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 800;
+const DEFAULT_ANALYSIS_MAX_OUTPUT_TOKENS = 6000;
+const MINIMAX_M3_INPUT_USD_PER_MILLION_TOKENS = 0.30;
+const MINIMAX_M3_OUTPUT_USD_PER_MILLION_TOKENS = 1.20;
+
+const DEFAULT_MAX_OUTPUT_TOKENS = DEFAULT_ANALYSIS_MAX_OUTPUT_TOKENS;
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 
 function requireNonEmptyString(value, label) {
@@ -29,6 +34,12 @@ function estimateTokensForMessages(messages) {
   const characterCount = messages.reduce((total, message) => total + String(message.content ?? '').length + String(message.role ?? '').length, 0);
   return Math.ceil(characterCount / CHARS_PER_TOKEN_ESTIMATE);
 }
+function estimateLiveCallCostUsd({ estimatedInputTokens, requestedOutputTokens }) {
+  const inputCost = (estimatedInputTokens / 1_000_000) * MINIMAX_M3_INPUT_USD_PER_MILLION_TOKENS;
+  const outputCost = (requestedOutputTokens / 1_000_000) * MINIMAX_M3_OUTPUT_USD_PER_MILLION_TOKENS;
+  return inputCost + outputCost;
+}
+
 
 function normalizeBudget(budget = {}) {
   return {
@@ -46,7 +57,7 @@ function normalizeBudget(budget = {}) {
   };
 }
 
-function assertWithinBudget({ budget, estimatedInputTokens, requestedOutputTokens }) {
+function assertWithinBudget({ budget, estimatedInputTokens, requestedOutputTokens, estimatedRequestCostUsd }) {
   if (budget.usedLiveCalls >= budget.maxLiveCalls) {
     throw new Error('MiniMax live call budget exceeded before transport invocation');
   }
@@ -59,7 +70,7 @@ function assertWithinBudget({ budget, estimatedInputTokens, requestedOutputToken
   if (requestedOutputTokens > budget.maxOutputTokens) {
     throw new Error('MiniMax request is over-budget for output tokens before transport invocation');
   }
-  if (budget.estimatedCostUsd > budget.maxEstimatedCostUsd) {
+  if (budget.estimatedCostUsd + estimatedRequestCostUsd > budget.maxEstimatedCostUsd) {
     throw new Error('MiniMax request is over-budget for estimated live-call cost before transport invocation');
   }
   if (budget.timeoutMs <= 0 || budget.maxRetries < 0) {
@@ -101,7 +112,14 @@ async function fetchTransport(request) {
 
 function responseContent(providerResponse) {
   const choice = providerResponse?.choices?.[0];
-  return choice?.message?.content ?? choice?.text ?? providerResponse?.output_text ?? '';
+  return choice?.message?.content
+    ?? choice?.message
+    ?? choice?.text
+    ?? providerResponse?.output_text
+    ?? providerResponse?.output
+    ?? providerResponse?.message
+    ?? providerResponse?.answer
+    ?? '';
 }
 
 const UNSTRUCTURED_CONTENT = Symbol('unstructured MiniMax content');
@@ -123,6 +141,38 @@ function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const PROVIDER_CONTAINER_KEYS = Object.freeze([
+  'answer',
+  'message',
+  'content',
+  'text',
+  'output',
+  'output_text',
+  'result',
+  'data',
+  'response',
+]);
+
+const ANALYSIS_FIELD_KEYS = Object.freeze([
+  'summary',
+  'sections',
+  'entities',
+  'requirements',
+  'requiredItems',
+  'required_items',
+  'obligations',
+  'deliverables',
+  'risks',
+  'tradeoffs',
+  'tradeOffs',
+  'uncertainties',
+  'recommendedQuestions',
+  'recommended_questions',
+  'questions',
+]);
+
+const CHAT_FIELD_KEYS = Object.freeze(['answer', 'text', 'content', 'summary', 'final', 'citations', 'uncertainty', 'metadata']);
+
 function stripMarkdownJsonFence(content) {
   const text = String(content ?? '').trim();
   const fullFence = text.match(/^```(?:json|javascript|js)?\s*([\s\S]*?)\s*```$/i);
@@ -141,15 +191,110 @@ function parseJsonCandidate(content) {
   }
 }
 
+function hasAnyKey(source, keys) {
+  return isObject(source) && keys.some((key) => Object.prototype.hasOwnProperty.call(source, key));
+}
+
+function parsedStringValue(value) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+  const candidate = stripMarkdownJsonFence(value);
+  if (!/^[{["]/.test(candidate)) {
+    return null;
+  }
+  return parseJsonCandidate(candidate);
+}
+
+function normalizeContentArray(items, depth) {
+  const normalizedItems = items
+    .map((item) => recursivelyUnwrapProviderContent(item, depth + 1))
+    .filter((item) => {
+      if (typeof item === 'string') return item.trim() !== '';
+      if (Array.isArray(item)) return item.length > 0;
+      if (isObject(item)) return Object.keys(item).length > 0;
+      return item !== null && item !== undefined;
+    });
+  const structured = normalizedItems.find((item) => isObject(item) && (hasAnyKey(item, ANALYSIS_FIELD_KEYS) || hasAnyKey(item, CHAT_FIELD_KEYS)));
+  if (structured) {
+    return structured;
+  }
+  if (normalizedItems.every((item) => typeof item === 'string')) {
+    return normalizedItems.join('\n').trim();
+  }
+  return normalizedItems;
+}
+
+function recursivelyUnwrapProviderContent(value, depth = 0) {
+  if (depth > 8 || value === null || value === undefined) {
+    return value;
+  }
+
+  const parsedString = parsedStringValue(value);
+  if (parsedString !== null) {
+    return recursivelyUnwrapProviderContent(parsedString, depth + 1);
+  }
+  if (typeof value === 'string') {
+    return stripMarkdownJsonFence(value);
+  }
+
+  if (Array.isArray(value)) {
+    return normalizeContentArray(value, depth);
+  }
+
+  if (!isObject(value)) {
+    return value;
+  }
+
+  const normalized = Object.fromEntries(
+    Object.entries(value).map(([key, item]) => {
+      if ((ANALYSIS_FIELD_KEYS.includes(key) || key === 'citations') && Array.isArray(item)) {
+        return [key, item.map((entry) => recursivelyUnwrapProviderContent(entry, depth + 1))];
+      }
+      return [key, recursivelyUnwrapProviderContent(item, depth + 1)];
+    }),
+  );
+
+  const hasCanonicalAnalysis = hasAnyKey(normalized, ANALYSIS_FIELD_KEYS);
+  const hasCanonicalChat = hasAnyKey(normalized, CHAT_FIELD_KEYS) && (
+    typeof normalized.answer === 'string'
+    || isObject(normalized.answer)
+    || typeof normalized.text === 'string'
+    || typeof normalized.content === 'string'
+    || Array.isArray(normalized.citations)
+  );
+  if (hasCanonicalAnalysis || hasCanonicalChat) {
+    return normalized;
+  }
+
+  for (const key of PROVIDER_CONTAINER_KEYS) {
+    const nested = normalized[key];
+    if (isObject(nested) || Array.isArray(nested)) {
+      return recursivelyUnwrapProviderContent(nested, depth + 1);
+    }
+    if (typeof nested === 'string' && nested.trim() !== '') {
+      return nested;
+    }
+  }
+
+  return normalized;
+}
+
 function parseJsonContent(content) {
-  if (typeof content !== 'string' || content.trim() === '') {
+  if (typeof content !== 'string' && !isObject(content) && !Array.isArray(content)) {
+    return {};
+  }
+  if (typeof content === 'string' && content.trim() === '') {
     return {};
   }
 
-  const candidate = stripMarkdownJsonFence(content);
-  const parsed = parseJsonCandidate(candidate);
-  if (parsed !== null) {
-    return isObject(parsed) ? parsed : { items: Array.isArray(parsed) ? parsed : [], answer: Array.isArray(parsed) ? '' : String(parsed) };
+  const candidate = typeof content === 'string' ? stripMarkdownJsonFence(content) : content;
+  const parsed = typeof candidate === 'string' ? parseJsonCandidate(candidate) : candidate;
+  if (parsed !== null && parsed !== undefined) {
+    const normalized = recursivelyUnwrapProviderContent(parsed);
+    return isObject(normalized)
+      ? normalized
+      : { items: Array.isArray(normalized) ? normalized : [], answer: Array.isArray(normalized) ? '' : String(normalized) };
   }
 
   const fallback = { answer: candidate };
@@ -292,6 +437,24 @@ function normalizedStringList(value, secrets) {
     .filter((item) => item.trim() !== '');
 }
 
+function displayTextFromValue(value, secrets, fallback = '') {
+  if (typeof value === 'string') {
+    return sanitizeDisplayText(value, secrets, fallback);
+  }
+  if (isObject(value)) {
+    const direct = textFromPayload(value);
+    if (direct) {
+      return sanitizeDisplayText(direct, secrets, fallback);
+    }
+    const joined = Object.values(sanitizeDisplayValue(value, secrets))
+      .filter((item) => typeof item === 'string' && item.trim() !== '')
+      .join(' ');
+    return sanitizeDisplayText(joined, secrets, fallback);
+  }
+  return fallback;
+}
+
+
 function analysisFromParsedContent(parsed, secrets = {}) {
   const source = payloadForDisplay(parsed);
 
@@ -313,11 +476,8 @@ function analysisFromParsedContent(parsed, secrets = {}) {
     };
   }
 
-  const summary = sanitizeDisplayText(
-    source.summary ?? (typeof parsed?.answer === 'string' && parsed.answer.trim() !== '' ? parsed.answer : source.content ?? source.text),
-    secrets,
-    SAFE_ANALYSIS_LIMITATION_SUMMARY,
-  );
+  const summarySource = source.summary ?? (typeof parsed?.answer === 'string' && parsed.answer.trim() !== '' ? parsed.answer : source.content ?? source.text);
+  const summary = displayTextFromValue(summarySource, secrets, SAFE_ANALYSIS_LIMITATION_SUMMARY);
 
   return {
     summary,
@@ -401,7 +561,6 @@ function metadataFrom({ providerResponse, model, prompt, context, estimatedInput
     contextStrategy: context?.strategy ?? null,
     retrievalBackend: context?.retrievalBackend ?? null,
     fallbackReason: context?.fallbackReason ?? null,
-    providerResponseId: providerResponse?.id ?? null,
     tokenUsage: tokenUsageFrom(providerResponse),
   };
 
@@ -444,7 +603,7 @@ export function createMiniMaxProvider({
   model = DEFAULT_MODEL,
   transport = fetchTransport,
   budget,
-  maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS,
+  maxOutputTokens = DEFAULT_CHAT_MAX_OUTPUT_TOKENS,
 } = {}) {
   const configuredApiKey = requireNonEmptyString(apiKey, 'MiniMax API key');
   const configuredBaseUrl = requireNonEmptyString(baseUrl, 'MiniMax base URL');
@@ -459,7 +618,8 @@ export function createMiniMaxProvider({
 
   async function invoke({ prompt, messages, context, outputTokens = maxOutputTokens }) {
     const estimatedInputTokens = estimateTokensForMessages(messages);
-    assertWithinBudget({ budget: configuredBudget, estimatedInputTokens, requestedOutputTokens: outputTokens });
+    const estimatedRequestCostUsd = estimateLiveCallCostUsd({ estimatedInputTokens, requestedOutputTokens: outputTokens });
+    assertWithinBudget({ budget: configuredBudget, estimatedInputTokens, requestedOutputTokens: outputTokens, estimatedRequestCostUsd });
 
     const request = {
       provider: 'minimax',
@@ -486,9 +646,11 @@ export function createMiniMaxProvider({
         maxRetries: configuredBudget.maxRetries,
         concurrencyLimit: configuredBudget.concurrencyLimit,
         estimatedInputTokens,
+        estimatedRequestCostUsd,
       },
     };
 
+    configuredBudget.estimatedCostUsd += estimatedRequestCostUsd;
     configuredBudget.usedLiveCalls += 1;
     configuredBudget.activeCalls += 1;
     try {
@@ -549,7 +711,7 @@ export function createMiniMaxProvider({
       fallbackReason: context.fallbackReason,
       secrets: { ...secrets, minimaxApiKey: configuredApiKey },
     });
-    const { parsed, metadata } = await invoke({ prompt, messages, context: { ...context, strategy: context.strategy ?? 'analysis' } });
+    const { parsed, metadata } = await invoke({ prompt, messages, context: { ...context, strategy: context.strategy ?? 'analysis' }, outputTokens: Math.max(maxOutputTokens, DEFAULT_ANALYSIS_MAX_OUTPUT_TOKENS) });
     return { analysis: analysisFromParsedContent(parsed, secrets), metadata };
   }
 

@@ -83,7 +83,6 @@ export async function runMiniMaxLiveSmoke({
     ok: true,
     provider: response.metadata.provider,
     model: response.metadata.model,
-    responseId: response.metadata.providerResponseId,
     tokenUsage: safeTokenUsage(response.metadata.tokenUsage),
   };
   safeLog(log, { event: 'minimax_live_smoke_ok', ...result }, { ...secrets, providerResponse: response.answer });

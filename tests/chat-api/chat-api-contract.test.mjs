@@ -276,7 +276,7 @@ function assertReviewerAnswerSurfaceSafe(answer, label) {
     ['raw provider payload', /raw[_\s-]*provider|provider[_\s-]*(?:payload|response)|RAW_PROVIDER_PAYLOAD_API_CANARY/i],
     ['internal response ID', /provider-response-api-raw-123|response[_\s-]*id/i],
     ['internal document ID', new RegExp(ownedDocument.id, 'i')],
-    ['internal chunk ID', /chunk-(?:confidentiality|forged|notice)|retrieved[_\s-]*chunk/i],
+    ['internal chunk ID', /\bchunk[-_][A-Za-z0-9][A-Za-z0-9_-]*\b|retrieved[_\s-]*chunk/i],
     ['retrieval score metadata', /retrieval[_\s-]*score|normalizedScore|low_retrieval_coverage/i],
     ['hidden reasoning', /hidden[_\s-]*reasoning|chain[-\s]*of[-\s]*thought|<think\b|HIDDEN_REASONING_API_CANARY/i],
     ['policy canary', /SYSTEM_POLICY_API_CANARY|system[_\s-]*policy|developer instruction/i],
@@ -846,17 +846,26 @@ test('chat endpoint refuses out-of-document questions without model invocation o
   const retrievalProvider = createRetrievalProviderFake({ chunks: [] });
   const aiProvider = createAiProviderFake();
   const { baseUrl } = await createServerHarness(t, { retrievalProvider, aiProvider, chatRepository: createChatRepositoryFake() });
+  const cases = [
+    { name: 'current stock price', question: 'What is Acme\'s current stock price today?' },
+    { name: 'weather', question: 'What is the weather today?' },
+  ];
 
-  const response = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
-    method: 'POST',
-    body: { question: 'What is Acme\'s current stock price today?' },
-  });
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async () => {
+      const response = await requestJson(baseUrl, `/api/documents/${ownedDocument.id}/chat`, {
+        method: 'POST',
+        body: { question: currentCase.question },
+      });
 
-  assert.equal(response.status, 200, 'unsupported chat should return a handled response, not a server error');
-  assert.equal(response.body.answer.unsupported, true, 'out-of-document questions must be surfaced as unsupported');
-  assert.equal(response.body.answer.metadata.contextStrategy, 'unsupported');
-  assert.equal(response.body.answer.metadata.unsupportedReason, 'outside_document_scope');
-  assert.deepEqual(response.body.answer.citations, [], 'unsupported answers must not fabricate citations');
+      assert.equal(response.status, 200, `${currentCase.name} unsupported chat should return a handled response, not a server error`);
+      assert.equal(response.body.answer.unsupported, true, `${currentCase.name} out-of-document question must be surfaced as unsupported`);
+      assert.equal(response.body.answer.metadata.contextStrategy, 'unsupported');
+      assert.equal(response.body.answer.metadata.unsupportedReason, 'outside_document_scope');
+      assert.deepEqual(response.body.answer.citations, [], `${currentCase.name} unsupported answer must not fabricate citations`);
+    });
+  }
+
   assert.equal(aiProvider.answerCalls.length, 0, 'unsupported answers must not invoke MiniMax to invent external facts');
 });
 
@@ -1023,6 +1032,114 @@ test('chat endpoint preserves useful broad assessment overview answers as full-d
   assert.deepEqual(response.body.answer.citations, [], 'full-document overview without precise citations must not fabricate chunk citations');
 });
 
+test('chat endpoint treats broad assessment requirements and deliverables questions as source-summary intents despite low retrieval coverage', async (t) => {
+  const cases = [
+    {
+      name: 'main requirements',
+      question: 'What are the main requirements in this source?',
+      evidence: 'The backend must expose a REST API for authentication, document creation, analysis, chat, and source retrieval.',
+      providerText: 'The source asks for a REST API, an LLM provider boundary, JWT authentication and ownership checks, React reviewer UX, privacy-safe logging, reliability tests, and AWS deployment thinking.',
+      mustMention: ['REST API', 'LLM provider', 'JWT', 'React', 'AWS'],
+    },
+    {
+      name: 'generic source requirements',
+      question: 'What does this source require?',
+      evidence: 'The assessment requires a REST API, one persistence layer, JWT authentication, React frontend, AWS deployment, and a README.',
+      providerText: 'This source requires a REST API, persistence, JWT authentication, a React frontend, AWS deployment planning, and a README with architecture, AI design, trade-offs, limitations, and run instructions.',
+      mustMention: ['REST API', 'persistence', 'JWT', 'React', 'AWS', 'README'],
+    },
+    {
+      name: 'required by source phrasing',
+      question: 'What is required by this source?',
+      evidence: 'The candidate must build a small AI-assisted full-stack application and document architecture decisions.',
+      providerText: 'The source requires a small AI-assisted full-stack application, documented architecture decisions, AI design choices, trade-offs, limitations, and local run instructions.',
+      mustMention: ['full-stack application', 'architecture decisions', 'AI design', 'run instructions'],
+    },
+    {
+      name: 'deliverables',
+      question: 'What deliverables does this source request?',
+      evidence: 'The candidate must deliver a Git repository with runnable local setup instructions and a README.',
+      providerText: 'The source requests a Git repository, runnable local setup instructions, and a README explaining architecture, AI design, privacy decisions, reliability strategy, deployment approach, and trade-offs.',
+      mustMention: ['Git repository', 'runnable local setup instructions', 'README', 'deployment'],
+    },
+    {
+      name: 'implicit deliverables expected',
+      question: 'What deliverables are expected?',
+      evidence: 'Deliverables include a Git repository and a README with local run instructions, architecture, AI design, trade-offs, and limitations.',
+      providerText: 'The expected deliverables are a Git repository and a README documenting local run instructions, architecture decisions, AI design choices, trade-offs, limitations, and deployment notes.',
+      mustMention: ['Git repository', 'README', 'local run instructions', 'architecture'],
+      expectedStrategy: 'rag',
+      expectedDisplayState: 'grounded',
+    },
+    {
+      name: 'informal backend necessary',
+      question: 'whats backend is necessary?',
+      evidence: 'Backend requirements include a REST API, one LLM endpoint, persistence, authentication with JWT or similar, provider abstraction, and safe prompt handling.',
+      providerText: 'The backend needs a REST API with at least one LLM endpoint, a persistence layer, JWT or similar authentication, an AI provider abstraction, and prompt-injection and unsafe-input protections.',
+      mustMention: ['REST API', 'LLM endpoint', 'persistence', 'JWT', 'provider abstraction'],
+      expectedStrategy: 'rag',
+      expectedDisplayState: 'grounded',
+    },
+  ];
+
+  for (const currentCase of cases) {
+    await t.test(currentCase.name, async (st) => {
+      const retrievalProvider = createRetrievalProviderFake({
+        chunks: [{
+          chunkId: `assessment-${currentCase.name.replace(/\s+/g, '-')}`,
+          documentId: assessmentDocument.id,
+          headingPath: ['Full Stack AI Engineer Assessment', currentCase.name],
+          content: currentCase.evidence,
+          contentExcerpt: currentCase.evidence,
+          chunkIndex: 0,
+          tokenEstimate: 18,
+          normalizedScore: 0.16,
+        }],
+        scoreSummary: { topScore: 0.16, averageScore: 0.16, passingChunks: 0, relevanceThreshold: 0.35 },
+      });
+      const expectedStrategy = currentCase.expectedStrategy ?? 'fallback';
+      const chunkId = `assessment-${currentCase.name.replace(/\s+/g, '-')}`;
+      const aiProvider = createAiProviderFake({
+        chatResult: {
+          text: currentCase.providerText,
+          citations: expectedStrategy === 'rag' ? [{ chunkId, quote: currentCase.evidence }] : [],
+          uncertainty: 'medium',
+          metadata: {
+            provider: 'minimax',
+            model: 'MiniMax-M3',
+            promptId: expectedStrategy === 'rag' ? 'doculens.chat' : 'doculens.fallback',
+            promptVersion: '2026-07-07.1',
+            contextStrategy: expectedStrategy,
+          },
+        },
+      });
+      const { baseUrl } = await createServerHarness(st, {
+        documents: createDocumentServiceFake(assessmentDocument),
+        retrievalProvider,
+        aiProvider,
+        chatRepository: createChatRepositoryFake(),
+      });
+
+      const response = await requestJson(baseUrl, `/api/documents/${assessmentDocument.id}/chat`, {
+        method: 'POST',
+        body: { question: currentCase.question },
+      });
+
+      assert.equal(response.status, 201, `${currentCase.name} source-summary question should create an answer`);
+      assert.equal(aiProvider.answerCalls.length, 1, `${currentCase.name} source-summary question should invoke provider with source context`);
+      const expectedDisplayState = currentCase.expectedDisplayState ?? 'full_document_overview';
+      assert.equal(aiProvider.answerCalls[0].contextStrategy, expectedStrategy, `${currentCase.name} should use the expected retrieval strategy`);
+      assert.equal(response.body.answer.displayState.kind, expectedDisplayState, `${currentCase.name} must use the expected answer display state`);
+      assert.equal(response.body.answer.metadata.fallbackReason ?? null, expectedStrategy === 'fallback' ? 'global_question' : null, `${currentCase.name} fallback reason must match strategy`);
+      assert.equal(response.body.answer.citations.length, expectedStrategy === 'rag' ? 1 : 0, `${currentCase.name} citation count must match strategy`);
+      for (const term of currentCase.mustMention) {
+        assert.match(visibleAnswerSurface(response.body.answer), new RegExp(term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'), `${currentCase.name} answer must mention ${term}`);
+      }
+      assertReviewerAnswerSurfaceSafe(response.body.answer, `${currentCase.name} source-summary answer`);
+    });
+  }
+});
+
 test('assessment golden questions return grounded, overview, low-coverage, and unsupported answer states without unsafe display leakage', async (t) => {
   const goldenQuestions = assessmentGoldenAssertions.chatGoldenQuestions;
   const groundedEntries = Object.entries(goldenQuestions).filter(([name]) => name !== 'overview');
@@ -1100,6 +1217,51 @@ test('assessment golden questions return grounded, overview, low-coverage, and u
     assertGoldenAnswer(response.body.answer, unsupportedAssertion, 'unsupported assessment answer');
     assert.equal(response.body.answer.displayState.kind, 'unsupported');
     assert.equal(aiProvider.answerCalls.length, 0, 'unsupported assessment question must not call the provider');
+  });
+
+  await t.test('current-time outside-source question is unsupported without provider citations or chunk IDs', async (st) => {
+    const retrievalProvider = createRetrievalProviderFake({
+      chunks: [{
+        chunkId: 'chunk_e84dba11f8b141702926a1ba',
+        documentId: assessmentDocument.id,
+        headingPath: ['Full Stack AI Engineer Assessment', 'Overview & Purpose'],
+        content: 'This assessment evaluates full-stack AI engineering ability across backend, frontend, infrastructure, and deployment.',
+        contentExcerpt: 'This assessment evaluates full-stack AI engineering ability.',
+        chunkIndex: 0,
+        tokenEstimate: 18,
+        normalizedScore: 0.24,
+      }],
+      scoreSummary: { topScore: 0.24, averageScore: 0.24, passingChunks: 0, relevanceThreshold: 0.35 },
+    });
+    const aiProvider = createAiProviderFake({
+      chatResult: {
+        text: 'The current time is unsupported by the document. None of the provided chunks (chunk_e84dba11f8b141702926a1ba) contain any time information.',
+        citations: [{ chunkId: 'chunk_e84dba11f8b141702926a1ba', quote: 'Overview & Purpose' }],
+        uncertainty: 'high',
+      },
+    });
+    const chatRepository = createChatRepositoryFake();
+    const { baseUrl } = await createServerHarness(st, {
+      documents: createDocumentServiceFake(assessmentDocument),
+      retrievalProvider,
+      aiProvider,
+      chatRepository,
+    });
+
+    const response = await requestJson(baseUrl, `/api/documents/${assessmentDocument.id}/chat`, {
+      method: 'POST',
+      body: { question: 'what time is?' },
+    });
+
+    assert.equal(response.status, 200, 'current-time outside-source question should be handled without model invocation');
+    assert.equal(response.body.answer.displayState.kind, 'unsupported');
+    assert.deepEqual(response.body.answer.citations, [], 'unsupported current-time answer must not cite retrieved chunks');
+    assert.equal(aiProvider.answerCalls.length, 0, 'unsupported current-time answer must not call the provider');
+    assert.deepEqual(response.body.retrievedChunks, [], 'unsupported current-time response must not expose retrieved chunk metadata');
+    assert.equal(Object.hasOwn(response.body.answer.metadata, 'retrievedChunkIds'), false, 'unsupported answer metadata must omit internal retrieved chunk IDs');
+    assert.doesNotMatch(JSON.stringify(response.body), /chunk_e84dba11f8b141702926a1ba/, 'unsupported response body must not expose internal chunk IDs');
+    assert.deepEqual(chatRepository.saved[0].retrievedChunks, [], 'persisted unsupported audit payload must not retain retrieved chunk metadata');
+    assertReviewerAnswerSurfaceSafe(response.body.answer, 'unsupported current-time answer');
   });
 
   await t.test('specific low-coverage assessment question', async (st) => {
@@ -1302,6 +1464,34 @@ test('chat endpoint normalizes JSON-shaped provider answer text and keeps raw pr
         'RAW_PROVIDER_PAYLOAD_API_CANARY',
         'SYSTEM_POLICY_API_CANARY',
         'HIDDEN_REASONING_API_CANARY',
+      ],
+    },
+    {
+      name: 'unterminated markdown JSON fence answer',
+      providerText: [
+        '```json',
+        JSON.stringify({
+          answer: 'The backend must expose authenticated REST APIs, AI analysis, chat, persistence, and source evidence review.',
+          provider_payload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+          policy: 'SYSTEM_POLICY_API_CANARY',
+          hidden_reasoning: 'HIDDEN_REASONING_API_CANARY',
+        }),
+      ].join('\n'),
+      expectedText: 'The backend must expose authenticated REST APIs, AI analysis, chat, persistence, and source evidence review.',
+      forbiddenText: [
+        '```json',
+        'provider_payload',
+        'RAW_PROVIDER_PAYLOAD_API_CANARY',
+        'SYSTEM_POLICY_API_CANARY',
+        'HIDDEN_REASONING_API_CANARY',
+      ],
+    },
+    {
+      name: 'plain answer with internal chunk id',
+      providerText: 'Acme must protect Beta financial information for three years. See chunk_e84dba11f8b141702926a1ba.',
+      expectedText: 'Acme must protect Beta financial information for three years. See internal evidence reference.',
+      forbiddenText: [
+        'chunk_e84dba11f8b141702926a1ba',
       ],
     },
   ];

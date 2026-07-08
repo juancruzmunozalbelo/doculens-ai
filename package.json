@@ -20,7 +20,7 @@
     "eval": "node scripts/checks/eval-contract.mjs",
     "test:eval": "node --test tests/eval/*.test.mjs",
     "smoke:minimax": "node scripts/checks/minimax-live-smoke.mjs",
-    "verify": "node --test scripts/guardrails/check-tdd.test.mjs && node --test tests/foundation/foundation-contract.test.mjs",
+    "verify": "node --test scripts/guardrails/check-tdd.test.mjs && node --test tests/foundation/*.test.mjs",
     "guard:tdd": "node scripts/guardrails/check-tdd.mjs --staged",
     "aws:check-context": "node scripts/checks/aws-context-guard.mjs --profile ${AWS_PROFILE:-doculens-demo} --region ${AWS_REGION:-us-east-1}",
     "mutation:unit": "node scripts/checks/mutation-runner.mjs --mode=unit --scope=apps/api/src/server/security,apps/api/src/server/ingestion,apps/api/src/server/retrieval --command=\"npm run test:unit\"",

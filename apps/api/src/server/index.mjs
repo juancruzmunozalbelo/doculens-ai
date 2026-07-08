@@ -23,13 +23,15 @@ import { createInMemoryChunkRepository } from './ingestion/chunk-repository.mjs'
 import { createMiniMaxProvider, MINIMAX_DEFAULTS } from './ai/minimax-provider.mjs';
 import { createDocumentAiService } from './chat/service.mjs';
 import { createRetrievalProvider } from './retrieval/provider.mjs';
+import { BACKEND_PROVENANCE } from './retrieval/utils.mjs';
+import { createEmbeddingProvider, EMBEDDING_DIMENSIONS_LOCAL_HASHING } from './embeddings/provider.mjs';
 import { createPostgreSqlRepositories } from './postgresql/repositories.mjs';
 import { createStructuredLogger, normalizeRequestId, safeLogger } from './logging/logger.mjs';
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_SERVER_MINIMAX_BUDGET = Object.freeze({
   maxLiveCalls: 32,
-  maxOutputTokens: 800,
+  maxOutputTokens: 6_000,
   maxInputTokens: 8_000,
   maxContextTokens: 8_000,
   maxRetries: 1,
@@ -316,6 +318,111 @@ function defaultAiProvider(config) {
   return createUnavailableAiProvider();
 }
 
+function vectorRetrievalEnabled(config) {
+  return config?.retrieval?.vectorEnabled === true;
+}
+
+function chunkHasReadyEmbedding(chunk) {
+  return chunk?.embeddingStatus === 'ready'
+    || chunk?.embedding_status === 'ready'
+    || chunk?.retrievalMetadata?.embedding?.status === 'ready'
+    || chunk?.retrieval_metadata?.embedding?.status === 'ready'
+    || Array.isArray(chunk?.embedding);
+}
+
+async function assertDocumentHasEmbeddings(chunksRepository, { documentId, userId }) {
+  if (!chunksRepository || typeof chunksRepository.listForDocumentForUser !== 'function') {
+    return;
+  }
+  const chunks = await chunksRepository.listForDocumentForUser({ documentId, userId });
+  if (chunks.length > 0 && chunks.some((chunk) => !chunkHasReadyEmbedding(chunk))) {
+    const error = new Error('document chunks are missing embeddings');
+    error.code = 'MISSING_CHUNK_EMBEDDINGS';
+    error.statusCode = 409;
+    throw error;
+  }
+}
+
+async function assertVectorReadiness(chunksRepository, { strict = false } = {}) {
+  if (!chunksRepository || typeof chunksRepository.checkVectorReadiness !== 'function') {
+    if (strict) {
+      const error = new Error('pgvector readiness check is unavailable for configured vector retrieval');
+      error.code = 'PGVECTOR_PREFLIGHT_UNAVAILABLE';
+      error.statusCode = 503;
+      throw error;
+    }
+    return;
+  }
+  const readiness = await chunksRepository.checkVectorReadiness({ expectedDimensions: EMBEDDING_DIMENSIONS_LOCAL_HASHING, strict });
+  if (readiness === false || readiness?.ready === false) {
+    const error = new Error('pgvector repository is unavailable');
+    error.code = 'VECTOR_UNAVAILABLE';
+    error.statusCode = 503;
+    error.readiness = readiness;
+    throw error;
+  }
+}
+
+function createRepositoryPreferredSearch({ chunksRepository, config, embeddingProvider }) {
+  const backend = config?.retrieval?.configuredBackend ?? config?.retrievalBackend ?? 'lexical_fallback';
+  if (backend === 'lexical_fallback') {
+    return null;
+  }
+
+  const searchMethod = backend === 'hybrid'
+    ? chunksRepository?.searchHybridForDocumentForUser
+    : chunksRepository?.searchByVectorForDocumentForUser;
+  const strictVectorMode = config?.retrieval?.embedding?.strict === true;
+  if (typeof searchMethod !== 'function') {
+    if (strictVectorMode) {
+      const error = new Error(`pgvector repository preferred search is unavailable for RETRIEVAL_BACKEND=${backend}`);
+      error.code = 'PGVECTOR_PREFLIGHT_UNAVAILABLE';
+      error.statusCode = 503;
+      throw error;
+    }
+    return null;
+  }
+
+  return async ({ documentId, userId, query, limit }) => {
+    if (!embeddingProvider || typeof embeddingProvider.embedText !== 'function') {
+      const error = new Error('embedding provider is unavailable');
+      error.code = 'EMBEDDING_PROVIDER_UNAVAILABLE';
+      error.statusCode = 503;
+      throw error;
+    }
+    await assertDocumentHasEmbeddings(chunksRepository, { documentId, userId });
+    await assertVectorReadiness(chunksRepository, { strict: config?.retrieval?.embedding?.strict === true });
+    const queryEmbedding = await embeddingProvider.embedText(query);
+    const rows = backend === 'hybrid'
+      ? await searchMethod.call(chunksRepository, {
+        documentId,
+        userId,
+        query,
+        embedding: queryEmbedding.vector,
+        limit,
+      })
+      : await searchMethod.call(chunksRepository, {
+        documentId,
+        userId,
+        embedding: queryEmbedding.vector,
+        limit,
+      });
+    return {
+      rows,
+      retrievalBackend: backend,
+      effectiveBackend: backend,
+      backendProvenance: BACKEND_PROVENANCE.postgresqlRepository,
+    };
+  };
+}
+
+function defaultEmbeddingProvider(config, overrides = {}) {
+  if (!vectorRetrievalEnabled(config)) {
+    return overrides.embeddingProvider ?? null;
+  }
+  return overrides.embeddingProvider ?? createEmbeddingProvider(config.retrieval.embedding);
+}
+
 function buildServices(config, overrides = {}) {
   const { repositories, selection } = selectDefaultRepositories(config, overrides);
   if (typeof overrides.onRepositorySelection === 'function') {
@@ -329,9 +436,31 @@ function buildServices(config, overrides = {}) {
     jwtSecret: config.jwtSecret,
     tokenTtlSeconds: config.jwtTokenTtlSeconds ?? 60 * 60,
   });
-  const documents = overrides.documents ?? repositories.documents ?? createDocumentService({ documents: documentsRepository, chunks: chunksRepository });
+  const embeddingProvider = defaultEmbeddingProvider(config, overrides);
+  const ingestion = {
+    ...(overrides.ingestion ?? {}),
+    embeddingProvider,
+    embedding: {
+      ...(config.retrieval?.embedding ?? {}),
+      enabled: vectorRetrievalEnabled(config),
+      ...(overrides.ingestion?.embedding ?? {}),
+    },
+    retrieval: config.retrieval,
+    retrievalBackend: config.retrievalBackend,
+  };
+  const documents = overrides.documents ?? repositories.documents ?? createDocumentService({
+    documents: documentsRepository,
+    chunks: chunksRepository,
+    ingestion,
+  });
   const aiProvider = overrides.aiProvider ?? defaultAiProvider(config);
-  const retrievalProvider = overrides.retrievalProvider ?? createRetrievalProvider({ chunkRepository: chunksRepository });
+  const preferredSearch = createRepositoryPreferredSearch({ chunksRepository, config, embeddingProvider });
+  const retrievalProvider = overrides.retrievalProvider ?? createRetrievalProvider({
+    preferredBackend: config.retrieval?.configuredBackend ?? config.retrievalBackend ?? 'lexical_fallback',
+    preferredSearch,
+    chunkRepository: chunksRepository,
+    preferredSearchProvenance: preferredSearch ? BACKEND_PROVENANCE.postgresqlRepository : BACKEND_PROVENANCE.unavailable,
+  });
   const documentAi = overrides.documentAi ?? createDocumentAiService({
     documents,
     aiProvider,
