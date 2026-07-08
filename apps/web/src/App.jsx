@@ -1238,6 +1238,7 @@ export function App() {
   const latestAnswer = answerHistory.at(-1)?.answer ?? null;
   const routeDocument = useMemo(() => {
     if (route.view !== 'review' || !route.documentId) return selectedDocument;
+    if (selectedDocument?.id === route.documentId && hasFullSourceContent(selectedDocument)) return selectedDocument;
     return documents.find((document) => document.id === route.documentId) ?? selectedDocument;
   }, [documents, route, selectedDocument]);
   const hasNoSources = Boolean(auth) && !loading && documents.length === 0 && route.view === 'intake' && !pendingSource;
