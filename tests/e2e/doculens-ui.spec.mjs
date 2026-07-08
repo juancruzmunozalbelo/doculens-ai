@@ -394,7 +394,10 @@ async function expectContainedNarrowSourcePreview(page) {
   expect(layout.previewContained, layoutDebug).toBe(true);
   expect(layout.activeContained, layoutDebug).toBe(true);
   expect(layout.sourceRailContained, layoutDebug).toBe(true);
-  if (layout.briefingHeight > 0) expect(layout.briefingContained, layoutDebug).toBe(true);
+  if (layout.briefingHeight > 0) {
+    expect(layout.briefingContained, layoutDebug).toBe(true);
+    expect(Math.abs(layout.preview.height - layout.briefingHeight), layoutDebug).toBeLessThanOrEqual(8);
+  }
   expect(layout.preview.height, layoutDebug).toBeLessThanOrEqual(Math.ceil(layout.viewportHeight * 0.65));
   expect(layout.previewScrollRect, layoutDebug).toBeTruthy();
   expect(layout.previewScrollOverflowY, layoutDebug).toMatch(/auto|scroll/i);
