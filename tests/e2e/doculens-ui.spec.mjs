@@ -1399,6 +1399,7 @@ test('narrow source workspace wraps long PDF filenames and keeps preview plus so
   await expect(byTestId(page, 'activeSource')).toContainText(/Full_Stack_AI_Engineer_Assessment_With_|Final_Final\.pdf/i);
   await expect(byTestId(page, 'evidencePanel')).toBeVisible();
   await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Backend, frontend, data privacy/i);
+  await expect(byTestId(page, 'evidenceExcerpt')).toContainText(/Section 28: Backend, frontend, data privacy/i);
 
   await expectContainedNarrowSourcePreview(page);
 

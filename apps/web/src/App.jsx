@@ -911,7 +911,7 @@ function ActiveSourceCard({ document }) {
 function SourcePreview({ document, activeEvidence }) {
   const excerptRef = useRef(null);
   const rawContent = document?.content ?? document?.text ?? '';
-  const overview = sanitizeDisplayText(rawContent, 'Choose a source to see the first excerpt.').slice(0, 1200);
+  const overview = sanitizeDisplayText(rawContent, 'Choose a source to see the source content.');
   const section = activeEvidence?.section ?? 'Source overview';
   const text = activeEvidence?.excerpt ?? overview;
   useEffect(() => {
