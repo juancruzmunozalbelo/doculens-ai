@@ -489,6 +489,80 @@ test('analysis endpoint saves and reloads canonical assessment fields without lo
   }
 });
 
+test('document AI analysis derives assessment requirements and deliverables when provider returns only sections', async () => {
+  const { createDocumentAiService } = await importRequired(
+    'apps/api/src/server/chat/service.mjs',
+    ['createDocumentAiService'],
+    'Document AI service',
+  );
+  const sectionsOnlyProviderAnalysis = {
+    summary: 'Full Stack AI Engineer Assessment includes backend, AI, frontend, operations, and deliverables sections.',
+    sections: [
+      { title: 'Backend requirements' },
+      { title: 'AI and retrieval requirements' },
+      { title: 'Frontend requirements' },
+      { title: 'Deployment and operations requirements' },
+      { title: 'Deliverables' },
+    ],
+    requirements: [],
+    deliverables: [],
+    metadata: {
+      provider: 'minimax',
+      model: 'MiniMax-M3',
+      promptId: 'doculens.analysis',
+      promptVersion: '2026-07-07.1',
+      contextStrategy: 'full_document',
+      providerResponseId: 'provider-response-api-raw-123',
+      rawProviderPayload: 'RAW_PROVIDER_PAYLOAD_API_CANARY',
+      systemPolicy: 'SYSTEM_POLICY_API_CANARY',
+    },
+  };
+  const analysisRepository = createAnalysisRepositoryFake();
+  const aiProvider = createAiProviderFake({ analysisResult: sectionsOnlyProviderAnalysis });
+  const documentAi = createDocumentAiService({
+    documents: createDocumentServiceFake(assessmentDocument),
+    aiProvider,
+    retrievalProvider: createRetrievalProviderFake({ chunks: [] }),
+    analysisRepository,
+    config: testConfig(),
+  });
+
+  const result = await documentAi.analyzeDocument({
+    currentUser: owner,
+    documentId: assessmentDocument.id,
+  });
+
+  assert.ok(result.analysis.requirements.length > 0, 'analysis must derive requirements from the owned assessment document when provider requirements are empty');
+  assert.ok(result.analysis.deliverables.length > 0, 'analysis must derive deliverables from the owned assessment document when provider deliverables are empty');
+  assert.ok(
+    result.analysis.requirements.every((item) => typeof item?.text === 'string' && item.text.trim().length > 0),
+    'derived requirements must be canonical reviewer-facing objects with text',
+  );
+  assert.ok(
+    result.analysis.deliverables.every((item) => typeof item?.text === 'string' && item.text.trim().length > 0),
+    'derived deliverables must be canonical reviewer-facing objects with text',
+  );
+  const requirementText = result.analysis.requirements.map((item) => `${item.category ?? ''} ${item.text}`).join('\n');
+  const deliverableText = result.analysis.deliverables.map((item) => `${item.category ?? ''} ${item.text}`).join('\n');
+  assert.match(requirementText, /Backend|REST API|LLM|JWT/i, 'derived requirements must include backend-specific assessment markers from the document');
+  assert.match(deliverableText, /Deliverables|Git repository|README|run/i, 'derived deliverables must include deliverable markers from the document');
+  assert.doesNotMatch(
+    JSON.stringify(result.analysis),
+    /RAW_PROVIDER|provider-response-api-raw-123|SYSTEM_POLICY_API_CANARY|rawProvider|providerResponseId|```|\[object Object\]/i,
+    'derived analysis must not expose unsafe raw provider artifacts or lossy object strings',
+  );
+  assert.deepEqual(
+    analysisRepository.saved[0].analysis.requirements,
+    result.analysis.requirements,
+    'persisted analysis must keep the derived canonical requirements',
+  );
+  assert.deepEqual(
+    analysisRepository.saved[0].analysis.deliverables,
+    result.analysis.deliverables,
+    'persisted analysis must keep the derived canonical deliverables',
+  );
+});
+
 test('analysis and chat create flows authorize child resources before providers or persistence', async (t) => {
   const events = [];
   const documents = createDocumentServiceFake(ownedDocument, { events });
