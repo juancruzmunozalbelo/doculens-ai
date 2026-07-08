@@ -40,6 +40,8 @@ const TEST_IDS = Object.freeze({
   sourceStatus: 'source.status',
   activeSource: 'source.active',
   reviewBriefing: 'review.briefing',
+  briefingSearch: 'review.briefing-search',
+  sourceSearch: 'source.search',
   starterQuestions: 'review.starter-questions',
   starterQuestion: 'review.starter-question',
   trustSummary: 'trust.summary',
@@ -628,12 +630,31 @@ function AppStyles() {
       :root { color-scheme: light; }
       *:focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
       button:disabled, input:disabled, textarea:disabled { cursor: not-allowed; opacity: 0.68; }
-      .workspace-grid { display: grid; grid-template-columns: minmax(220px, 0.62fr) minmax(280px, 0.9fr) minmax(360px, 1.35fr); gap: 1rem; align-items: start; }
-      .intake-grid { display: grid; grid-template-columns: minmax(260px, 0.75fr) minmax(320px, 1.25fr); gap: 1rem; align-items: start; }
-      .screen-shell, .review-workspace, .workspace-grid, .source-preview-column, [data-testid="${TEST_IDS.activeSource}"], [data-testid="${TEST_IDS.sourceCard}"] { min-width: 0; }
+      .workspace-grid { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr); grid-template-areas: "sources sources" "preview briefing" "chat chat"; gap: 1rem; align-items: start; }
+      .workspace-sources { grid-area: sources; display: grid; grid-template-columns: minmax(240px, 0.42fr) minmax(0, 1fr); gap: 1rem; align-items: stretch; }
+      .workspace-briefing { grid-area: briefing; min-width: 0; }
+      .workspace-chat-band { grid-area: chat; display: grid; gap: 1rem; min-width: 0; scroll-margin-top: 1rem; }
+      .source-management-panel { min-width: 0; overflow: hidden; padding: 0.85rem !important; }
+      .source-management-header { display: flex; align-items: end; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-block-end: 0.65rem; }
+      .source-management-header h2 { margin: 0; }
+      .source-management-header p { margin: 0.25rem 0 0; color: #64748b; }
+      .source-search-input, .briefing-search-input { width: min(24rem, 100%); border: 1px solid #cbd5e1; border-radius: 999px; padding: 0.55rem 0.8rem; font: inherit; background: #ffffff; }
+      .source-rail-list { display: flex; gap: 0.65rem; overflow-x: auto; overscroll-behavior-inline: contain; padding-bottom: 0.2rem; scroll-snap-type: x proximity; }
+      .source-rail-list [data-testid="${TEST_IDS.sourceCard}"] { flex: 0 0 min(17rem, 78vw); scroll-snap-align: start; }
+      .briefing-scroll { max-height: min(48vh, 32rem); overflow: auto; padding-inline-end: 0.35rem; scroll-padding-top: 0.5rem; }
+      .briefing-scroll article { scroll-margin-top: 0.5rem; }
+      .intake-grid { display: grid; grid-template-columns: minmax(320px, 0.95fr) minmax(320px, 1.05fr); grid-template-areas: "sources sources" "create preview"; gap: 1rem; align-items: start; }
+      .intake-sources { grid-area: sources; min-width: 0; }
+      .intake-create { grid-area: create; min-width: 0; }
+      .intake-preview { grid-area: preview; min-width: 0; }
+      .login-grid { min-width: 0; }
+      .login-feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.75rem; margin-block-start: 1rem; }
+      .login-feature-card { border: 1px solid rgba(255,255,255,0.18); border-radius: 16px; padding: 0.75rem; background: rgba(255,255,255,0.08); color: #dbeafe; min-width: 0; }
+      .screen-shell { overflow-x: clip; }
+      .screen-shell, .review-workspace, .workspace-grid, .workspace-sources, .workspace-chat-band, .intake-grid, .login-grid, .intake-grid > *, .login-grid > *, .source-management-panel, .source-preview-column, [data-testid="${TEST_IDS.activeSource}"], [data-testid="${TEST_IDS.sourceCreate}"], [data-testid="${TEST_IDS.sourceCard}"] { min-width: 0; }
       .source-title-text, .source-filename-text { display: block; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; hyphens: auto; }
       .source-filename-text { color: inherit; }
-      .source-preview-column { max-width: 100%; overflow: hidden; }
+      .source-preview-column { grid-area: preview; max-width: 100%; overflow: hidden; }
       .source-preview-column [data-testid="${TEST_IDS.evidenceExcerpt}"] { overflow-wrap: anywhere; word-break: break-word; }
       .source-card-enter { animation: card-in 180ms ease-out; }
       .status-dot { width: 0.48rem; height: 0.48rem; border-radius: 999px; background: #2563eb; display: inline-block; animation: pulse 900ms ease-in-out infinite alternate; }
@@ -642,8 +663,8 @@ function AppStyles() {
       @keyframes shimmer { 100% { transform: translateX(100%); } }
       @keyframes pulse { from { transform: translateY(0); opacity: .45; } to { transform: translateY(-2px); opacity: 1; } }
       @keyframes card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-      @media (max-width: 1060px) { .workspace-grid { grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.2fr); } .source-preview-column { grid-column: 1 / -1; } }
-      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .app-header { align-items: flex-start !important; } .source-preview-column { max-height: min(60vh, 34rem); overflow: auto; } }
+      @media (max-width: 1060px) { .workspace-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sources" "preview" "briefing" "chat"; } .workspace-sources { grid-template-columns: minmax(0, 1fr); } .intake-grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "sources" "create" "preview"; } .source-preview-column { grid-column: auto; } }
+      @media (max-width: 780px) { .workspace-grid, .intake-grid, .login-grid { grid-template-columns: minmax(0, 1fr) !important; } .login-feature-grid { grid-template-columns: minmax(0, 1fr); } .app-header { align-items: flex-start !important; } .source-preview-column { max-height: min(60vh, 34rem); overflow: auto; } }
       @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.001ms !important; } }
       @media print {
         body { background: #ffffff !important; }
@@ -720,6 +741,18 @@ function LoginView({ email, password, loading, error, onEmailChange, onPasswordC
           <p style={{ ...chipStyle, background: '#1e293b', color: '#bfdbfe' }}>Reviewer notebook</p>
           <h2 style={{ fontSize: '2.1rem', marginBlockEnd: '0.5rem' }}>Start with a source, then ask grounded questions.</h2>
           <p style={{ color: '#dbeafe', fontSize: '1.05rem' }}>Sign in to review a sample, pasted text, or a text-based PDF with citations and evidence available beside each answer.</p>
+          <div className="login-feature-grid" aria-label="Reviewer flow highlights">
+            {[
+              ['1', 'Add PDFs or text', 'Keep source context attached to every review.'],
+              ['2', 'Ask grounded questions', 'Answers stay scoped to the selected source.'],
+              ['3', 'Inspect evidence', 'Citations and preview controls stay close to the answer.'],
+            ].map(([step, title, body]) => (
+              <article key={step} className="login-feature-card">
+                <strong style={{ color: '#ffffff' }}>{step}. {title}</strong>
+                <p style={{ marginBlock: '0.35rem 0', fontSize: '0.9rem' }}>{body}</p>
+              </article>
+            ))}
+          </div>
         </div>
         <form onSubmit={onSubmit} style={panelStyle} aria-busy={Boolean(loading)}>
           <h2>Sign in</h2>
@@ -806,15 +839,32 @@ function PdfRecovery({ fileName, error, onChooseOther, onPasteText }) {
 }
 
 function SourceRail({ documents, activeDocument, pendingSource, loading, onOpenDocument, onRenameDocument, onDeleteDocument }) {
+  const [sourceQuery, setSourceQuery] = useState('');
   const cards = pendingSource ? [pendingSource, ...documents] : documents;
+  const normalizedQuery = compactWhitespace(sourceQuery).toLowerCase();
+  const visibleCards = normalizedQuery
+    ? cards.filter((document) => [
+      sourceTitle(document),
+      sourceFilename(document),
+      sourceMetadataLine(document),
+      document?.summary,
+      document?.description,
+    ].filter(Boolean).join(' ').toLowerCase().includes(normalizedQuery))
+    : cards;
   const titleCounts = new Map(cards.map((document) => sourceTitle(document).toLowerCase()).map((title) => [title, cards.filter((entry) => sourceTitle(entry).toLowerCase() === title).length]));
   if (cards.length === 0) return null;
   return (
-    <section data-testid={TEST_IDS.sourceManagement} className="no-print" style={panelStyle} aria-labelledby="sources-heading">
-      <h2 id="sources-heading" style={{ marginTop: 0 }}>Sources</h2>
-      <p style={{ color: '#64748b' }}>Open, rename, or delete sources. Failed upload retry stays in Add source.</p>
-      <div data-testid={TEST_IDS.sourceRail} role="list" style={{ display: 'grid', gap: '0.65rem' }}>
-        {cards.map((document) => {
+    <section data-testid={TEST_IDS.sourceManagement} className="source-management-panel no-print" style={panelStyle} aria-labelledby="sources-heading">
+      <div className="source-management-header">
+        <div>
+          <h2 id="sources-heading">Sources</h2>
+          <p>Open, rename, delete, or search sources. Scroll sideways when several sources are available.</p>
+        </div>
+        <label style={{ ...fieldStyle, margin: 0, minWidth: 'min(24rem, 100%)' }}>Search sources<input data-testid={TEST_IDS.sourceSearch} className="source-search-input" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} placeholder="Search title, filename, type…" /></label>
+      </div>
+      {visibleCards.length === 0 ? <OperationStatus empty={`No sources match "${sanitizeDisplayText(sourceQuery, 'that search')}".`} /> : null}
+      <div data-testid={TEST_IDS.sourceRail} role="list" className="source-rail-list">
+        {visibleCards.map((document) => {
           const active = document.id && activeDocument?.id === document.id;
           const filename = sourceFilename(document);
           const showFilename = filename && filename.toLowerCase() !== sourceTitle(document).toLowerCase();
@@ -891,6 +941,7 @@ function AnalysisCard({ title, items }) {
 
 function ReviewBriefing({ analysis, loading, onAnalyze }) {
   const busy = Boolean(loading);
+  const [briefingQuery, setBriefingQuery] = useState('');
   const requirements = asArray(analysis?.requirements).length > 0 ? analysis.requirements : analysis?.obligations;
   const recovery = isFallbackOnlyBriefing(analysis);
   const cards = analysis && !recovery ? [
@@ -902,9 +953,16 @@ function ReviewBriefing({ analysis, loading, onAnalyze }) {
     ['Uncertainties', analysis.uncertainties],
     ['Recommended questions', analysis.recommendedQuestions],
   ] : [];
+  const briefingNeedle = compactWhitespace(briefingQuery).toLowerCase();
+  const itemText = (items) => asArray(items).map((item) => formatAnalysisItem(item)).join(' ');
+  const summaryMatches = !briefingNeedle || safeBriefingSummary(analysis?.summary).toLowerCase().includes(briefingNeedle);
+  const visibleCards = briefingNeedle
+    ? cards.filter(([title, items]) => `${title} ${itemText(items)}`.toLowerCase().includes(briefingNeedle))
+    : cards;
+  const hasVisibleBriefing = summaryMatches || visibleCards.length > 0;
   return (
     <section data-testid={TEST_IDS.reviewBriefing} style={panelStyle} aria-labelledby="briefing-heading" aria-busy={busy}>
-      <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: '0.75rem' }}>
+      <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
         <div>
           <p style={{ ...chipStyle, background: '#eef2ff', color: '#3730a3' }}>Briefing</p>
           <h2 id="briefing-heading" style={{ marginTop: 0 }}>Review briefing</h2>
@@ -912,6 +970,9 @@ function ReviewBriefing({ analysis, loading, onAnalyze }) {
         <button data-testid={TEST_IDS.documentAnalyze} type="button" onClick={onAnalyze} disabled={busy} style={secondaryButtonStyle}>{busy ? 'Building briefing…' : analysis ? 'Regenerate briefing' : 'Generate briefing'}</button>
       </div>
       {busy ? <OperationStatus loading={loading} /> : null}
+      {analysis && !recovery ? (
+        <label style={{ ...fieldStyle, marginBlock: '0.5rem 0.75rem' }}>Search briefing<input data-testid={TEST_IDS.briefingSearch} className="briefing-search-input" value={briefingQuery} onChange={(event) => setBriefingQuery(event.target.value)} placeholder="Search requirements, risks, questions…" /></label>
+      ) : null}
       {analysis && recovery ? (
         <article style={{ border: '1px solid #fed7aa', borderRadius: '14px', padding: '0.9rem', background: '#fff7ed' }}>
           <h3 style={{ marginTop: 0 }}>Briefing needs another pass</h3>
@@ -919,12 +980,17 @@ function ReviewBriefing({ analysis, loading, onAnalyze }) {
           <p style={{ marginBlockEnd: 0 }}>No structured sections were recovered for this source yet. Retry the briefing, or ask a source overview question while the source preview remains available.</p>
         </article>
       ) : analysis ? (
-        <div style={{ display: 'grid', gap: '0.85rem' }}>
-          <article style={{ borderLeft: '4px solid #2563eb', paddingLeft: '0.85rem' }}>
-            <h3>Summary</h3>
-            <p data-testid={TEST_IDS.analysisSummary}>{safeBriefingSummary(analysis.summary)}</p>
-          </article>
-          {cards.map(([title, items]) => <AnalysisCard key={title} title={title} items={items} />)}
+        <div className="briefing-scroll" role="region" aria-label="Scrollable briefing results">
+          <div style={{ display: 'grid', gap: '0.85rem' }}>
+            {summaryMatches ? (
+              <article style={{ borderLeft: '4px solid #2563eb', paddingLeft: '0.85rem' }}>
+                <h3>Summary</h3>
+                <p data-testid={TEST_IDS.analysisSummary}>{safeBriefingSummary(analysis.summary)}</p>
+              </article>
+            ) : null}
+            {visibleCards.map(([title, items]) => <AnalysisCard key={title} title={title} items={items} />)}
+            {!hasVisibleBriefing ? <OperationStatus empty={`No briefing items match "${sanitizeDisplayText(briefingQuery, 'that search')}".`} /> : null}
+          </div>
         </div>
       ) : !busy ? (
         <div>
@@ -961,6 +1027,12 @@ function StarterQuestions({ document, analysis, onSelectQuestion }) {
 
 function ChatSection({ document, analysis, question, loading, error, answerHistory, onQuestionChange, onSubmit, onRetry, onSelectQuestion, onSelectEvidence }) {
   const busy = Boolean(loading);
+  const latestAnswerRef = useRef(null);
+  useEffect(() => {
+    if (!busy && answerHistory.length > 0) {
+      latestAnswerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [answerHistory.length, busy]);
   return (
     <section style={panelStyle} aria-labelledby="chat-heading" aria-busy={busy}>
       <h2 id="chat-heading">Ask this source</h2>
@@ -973,7 +1045,11 @@ function ChatSection({ document, analysis, question, loading, error, answerHisto
       {error && question.trim() ? <OperationStatus error={error} actions={<><button type="button" onClick={onRetry} style={secondaryButtonStyle}>Retry answer</button><button type="button" onClick={() => onSelectQuestion('What is this document about?')} style={mutedButtonStyle}>Ask overview instead</button></>} /> : null}
       {answerHistory.length === 0 ? <OperationStatus empty="Ask a source-specific question to see answer states, citations, and evidence used." /> : (
         <div style={{ display: 'grid', gap: '0.85rem', marginBlockStart: '1rem' }}>
-          {answerHistory.map((entry, index) => <AnswerCard key={entry.id} entry={entry} ordinal={index + 1} onSelectQuestion={onSelectQuestion} onSelectEvidence={onSelectEvidence} />)}
+          {answerHistory.map((entry, index) => (
+            <div key={entry.id} ref={index === answerHistory.length - 1 ? latestAnswerRef : null} style={{ scrollMarginTop: '1rem' }}>
+              <AnswerCard entry={entry} ordinal={index + 1} onSelectQuestion={onSelectQuestion} onSelectEvidence={onSelectEvidence} />
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -1097,13 +1173,15 @@ function ReviewWorkspace({ auth, route, documents, document, analysis, latestAns
         <PrintReviewOutput document={document} analysis={analysis} answerHistory={answerHistory} activeEvidence={activeEvidence} latestAnswer={latestAnswer} />
         <OperationStatus loading={pageLoading} error={error && !question.trim() ? error : ''} />
         <section data-testid={TEST_IDS.analysisPanel} className="workspace-grid" aria-label={`Review workspace for ${sourceTitle(document)}`}>
-          <aside style={{ display: 'grid', gap: '1rem' }}>
+          <div className="workspace-sources">
             <ActiveSourceCard document={document} />
             <SourceRail documents={documents} activeDocument={document} loading={loading} onOpenDocument={onOpenDocument} onRenameDocument={onRenameDocument} onDeleteDocument={onDeleteDocument} />
-          </aside>
+          </div>
           <SourcePreview document={document} activeEvidence={activeEvidence} />
-          <div style={{ display: 'grid', gap: '1rem' }}>
+          <div className="workspace-briefing">
             <ReviewBriefing analysis={analysis} loading={briefingLoading} onAnalyze={onAnalyze} />
+          </div>
+          <div className="workspace-chat-band">
             <ChatSection document={document} analysis={analysis} question={question} loading={chatLoading} error={error} answerHistory={answerHistory} onQuestionChange={onQuestionChange} onSubmit={onQuestionSubmit} onRetry={onRetryQuestion} onSelectQuestion={onSelectQuestion} onSelectEvidence={onSelectEvidence} />
             <TrustLayer metadata={latestMetadata} answer={latestAnswer} />
           </div>
@@ -1118,11 +1196,13 @@ function IntakeView({ auth, route, loading, error, empty, documents, selectedDoc
     <AppShell auth={auth} route={route} selectedDocument={selectedDocument} onNavigateIntake={onNavigateIntake} onNavigateWorkspace={onNavigateWorkspace} onLogout={onLogout}>
       <OperationStatus loading={loading && !pdfStatus ? loading : ''} error={error} empty={empty} />
       <div className="intake-grid">
-        <div style={{ display: 'grid', gap: '1rem' }}>
+        <div className="intake-sources">
+          <SourceRail documents={documents} activeDocument={selectedDocument} pendingSource={pendingSource} loading={loading} onOpenDocument={onOpenDocument} onRenameDocument={onRenameDocument} onDeleteDocument={onDeleteDocument} />
+        </div>
+        <div className="intake-create">
           <AddSourceFlow method={sourceMethod} loading={loading} documentTitle={documentTitle} documentContent={documentContent} selectedPdf={selectedPdf} pdfTitle={pdfTitle} pdfStatus={pdfStatus} pdfError={pdfError} onMethodChange={onSourceMethodChange} onStartSample={onStartSample} onPasteSubmit={onPasteSubmit} onTitleChange={onDocumentTitleChange} onContentChange={onDocumentContentChange} onPdfFileChange={onPdfFileChange} onPdfTitleChange={onPdfTitleChange} onPdfSubmit={onPdfSubmit} onPasteTextFallback={onPasteTextFallback} />
         </div>
-        <div style={{ display: 'grid', gap: '1rem' }}>
-          <SourceRail documents={documents} activeDocument={selectedDocument} pendingSource={pendingSource} loading={loading} onOpenDocument={onOpenDocument} onRenameDocument={onRenameDocument} onDeleteDocument={onDeleteDocument} />
+        <div className="intake-preview">
           {selectedDocument ? <SourcePreview document={selectedDocument} activeEvidence={null} /> : <section style={panelStyle}><h2>Source preview</h2><p>Add or open a source to preview its contents here.</p></section>}
         </div>
       </div>

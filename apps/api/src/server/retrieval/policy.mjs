@@ -30,10 +30,14 @@ const OUTSIDE_DOCUMENT_PATTERNS = [
   /\bcapital\s+of\b/i,
   /\bwho\s+won\b/i,
   /\breal[-\s]?time\b/i,
-  /\b(?:current|today|latest)\b.*\b(?:stock|share|market|weather|news|clima)\b/i,
+  /\b(?:what\s+time\s+is(?:\s+it)?|what(?:'s|\s+is)\s+(?:the\s+)?(?:current\s+)?time)(?:\s+(?:now|today|right\s+now|currently))?\s*\??$/i,
+  /\b(?:current\s+time|time\s+(?:now|today|right\s+now))\b/i,
+  /\b(?:what(?:'s|\s+is)\s+(?:the\s+)?(?:current\s+)?date|what\s+date\s+is(?:\s+it)?|what\s+day\s+is(?:\s+it)?)(?:\s+(?:today|now|right\s+now|currently))?\s*\??$/i,
+  /\b(?:current\s+date|today'?s\s+date|todays\s+date|date\s+today)\b/i,
+  /\b(?:hora|fecha)\s+(?:actual|es|de hoy)\b/i,
 ];
 
-const SOURCE_ANCHOR_PATTERN = /\b(?:this|the)\s+(?:assessment|document|source|file|pdf)\b|\b(?:in|from|within|according\s+to)\s+(?:this|the)\s+(?:assessment|document|source|file|pdf)\b/i;
+const SOURCE_ANCHOR_PATTERN = /\b(?:this|the|selected)\s+(?:agreement|assessment|contract|document|file|nda|pdf|source)\b|\b(?:in|from|within|according\s+to)\s+(?:this|the|selected)\s+(?:agreement|assessment|contract|document|file|nda|pdf|source)\b/i;
 
 const QUESTION_INTENT_TERMS = new Set([
   'what',

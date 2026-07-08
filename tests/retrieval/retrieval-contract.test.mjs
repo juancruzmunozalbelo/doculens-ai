@@ -790,6 +790,81 @@ test('deterministic coverage policy returns rag, fallback, or unsupported with a
       },
     },
     {
+      name: 'outside-document current-time question is unsupported instead of grounded in retrieved chunks',
+      input: {
+        question: 'what time is?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'assessment-overview', normalizedScore: 0.2, content: assessmentFixtureText.slice(0, 180) },
+        ],
+      },
+      expected: {
+        contextStrategy: 'unsupported',
+        fallbackReason: null,
+        unsupportedReason: 'outside_document_scope',
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.2,
+          minScore: 0.2,
+          averageScore: 0.2,
+          returnedChunks: 1,
+          passingChunks: 0,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'outside-document current-date question is unsupported even when a chunk scores well',
+      input: {
+        question: 'What is the current date?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'assessment-overview', normalizedScore: 0.91, content: assessmentFixtureText.slice(0, 180) },
+        ],
+      },
+      expected: {
+        contextStrategy: 'unsupported',
+        fallbackReason: null,
+        unsupportedReason: 'outside_document_scope',
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.91,
+          minScore: 0.91,
+          averageScore: 0.91,
+          returnedChunks: 1,
+          passingChunks: 1,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
+      name: 'source-anchored current-date question can use rag when retrieved evidence clears threshold',
+      input: {
+        question: 'What is the current date in this source?',
+        retrievalBackend: 'hybrid',
+        relevanceThreshold: 0.55,
+        retrievedChunks: [
+          { chunkId: 'source-current-date', normalizedScore: 0.91, content: 'The current date listed in this source is July 8, 2026.' },
+        ],
+      },
+      expected: {
+        contextStrategy: 'rag',
+        fallbackReason: null,
+        unsupportedReason: null,
+        retrievalBackend: 'hybrid',
+        retrievalScoreSummary: {
+          maxScore: 0.91,
+          minScore: 0.91,
+          averageScore: 0.91,
+          returnedChunks: 1,
+          passingChunks: 1,
+          relevanceThreshold: 0.55,
+        },
+      },
+    },
+    {
       name: 'outside-document current-share-price question is unsupported instead of silently using full-document fallback',
       input: {
         question: 'What is the current share price of Contoso today?',

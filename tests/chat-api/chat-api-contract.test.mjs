@@ -276,7 +276,7 @@ function assertReviewerAnswerSurfaceSafe(answer, label) {
     ['raw provider payload', /raw[_\s-]*provider|provider[_\s-]*(?:payload|response)|RAW_PROVIDER_PAYLOAD_API_CANARY/i],
     ['internal response ID', /provider-response-api-raw-123|response[_\s-]*id/i],
     ['internal document ID', new RegExp(ownedDocument.id, 'i')],
-    ['internal chunk ID', /chunk-(?:confidentiality|forged|notice)|retrieved[_\s-]*chunk/i],
+    ['internal chunk ID', /\bchunk[-_][A-Za-z0-9][A-Za-z0-9_-]*\b|retrieved[_\s-]*chunk/i],
     ['retrieval score metadata', /retrieval[_\s-]*score|normalizedScore|low_retrieval_coverage/i],
     ['hidden reasoning', /hidden[_\s-]*reasoning|chain[-\s]*of[-\s]*thought|<think\b|HIDDEN_REASONING_API_CANARY/i],
     ['policy canary', /SYSTEM_POLICY_API_CANARY|system[_\s-]*policy|developer instruction/i],
@@ -1219,6 +1219,51 @@ test('assessment golden questions return grounded, overview, low-coverage, and u
     assert.equal(aiProvider.answerCalls.length, 0, 'unsupported assessment question must not call the provider');
   });
 
+  await t.test('current-time outside-source question is unsupported without provider citations or chunk IDs', async (st) => {
+    const retrievalProvider = createRetrievalProviderFake({
+      chunks: [{
+        chunkId: 'chunk_e84dba11f8b141702926a1ba',
+        documentId: assessmentDocument.id,
+        headingPath: ['Full Stack AI Engineer Assessment', 'Overview & Purpose'],
+        content: 'This assessment evaluates full-stack AI engineering ability across backend, frontend, infrastructure, and deployment.',
+        contentExcerpt: 'This assessment evaluates full-stack AI engineering ability.',
+        chunkIndex: 0,
+        tokenEstimate: 18,
+        normalizedScore: 0.24,
+      }],
+      scoreSummary: { topScore: 0.24, averageScore: 0.24, passingChunks: 0, relevanceThreshold: 0.35 },
+    });
+    const aiProvider = createAiProviderFake({
+      chatResult: {
+        text: 'The current time is unsupported by the document. None of the provided chunks (chunk_e84dba11f8b141702926a1ba) contain any time information.',
+        citations: [{ chunkId: 'chunk_e84dba11f8b141702926a1ba', quote: 'Overview & Purpose' }],
+        uncertainty: 'high',
+      },
+    });
+    const chatRepository = createChatRepositoryFake();
+    const { baseUrl } = await createServerHarness(st, {
+      documents: createDocumentServiceFake(assessmentDocument),
+      retrievalProvider,
+      aiProvider,
+      chatRepository,
+    });
+
+    const response = await requestJson(baseUrl, `/api/documents/${assessmentDocument.id}/chat`, {
+      method: 'POST',
+      body: { question: 'what time is?' },
+    });
+
+    assert.equal(response.status, 200, 'current-time outside-source question should be handled without model invocation');
+    assert.equal(response.body.answer.displayState.kind, 'unsupported');
+    assert.deepEqual(response.body.answer.citations, [], 'unsupported current-time answer must not cite retrieved chunks');
+    assert.equal(aiProvider.answerCalls.length, 0, 'unsupported current-time answer must not call the provider');
+    assert.deepEqual(response.body.retrievedChunks, [], 'unsupported current-time response must not expose retrieved chunk metadata');
+    assert.equal(Object.hasOwn(response.body.answer.metadata, 'retrievedChunkIds'), false, 'unsupported answer metadata must omit internal retrieved chunk IDs');
+    assert.doesNotMatch(JSON.stringify(response.body), /chunk_e84dba11f8b141702926a1ba/, 'unsupported response body must not expose internal chunk IDs');
+    assert.deepEqual(chatRepository.saved[0].retrievedChunks, [], 'persisted unsupported audit payload must not retain retrieved chunk metadata');
+    assertReviewerAnswerSurfaceSafe(response.body.answer, 'unsupported current-time answer');
+  });
+
   await t.test('specific low-coverage assessment question', async (st) => {
     const retrievalProvider = createRetrievalProviderFake({
       chunks: [{
@@ -1439,6 +1484,14 @@ test('chat endpoint normalizes JSON-shaped provider answer text and keeps raw pr
         'RAW_PROVIDER_PAYLOAD_API_CANARY',
         'SYSTEM_POLICY_API_CANARY',
         'HIDDEN_REASONING_API_CANARY',
+      ],
+    },
+    {
+      name: 'plain answer with internal chunk id',
+      providerText: 'Acme must protect Beta financial information for three years. See chunk_e84dba11f8b141702926a1ba.',
+      expectedText: 'Acme must protect Beta financial information for three years. See internal evidence reference.',
+      forbiddenText: [
+        'chunk_e84dba11f8b141702926a1ba',
       ],
     },
   ];

@@ -37,6 +37,11 @@ const SENSITIVE_DISPLAY_PATTERNS = Object.freeze([
   { label: 'credential value', pattern: /\b(?:api[_-]?key|secret(?:[_-]?key)?|password|passwd|token|authorization)\s*[:=]\s*["']?[^\s'",;]{8,}["']?/gi, replacement: '[REDACTED:CREDENTIAL]' },
 ]);
 
+const INTERNAL_REFERENCE_DISPLAY_PATTERNS = Object.freeze([
+  { label: 'internal chunk ID', pattern: /\bchunk[_-][A-Za-z0-9][A-Za-z0-9_-]*\b/g, replacement: 'internal evidence reference' },
+  { label: 'provider response ID', pattern: /\bprovider[-_]response[-_][A-Za-z0-9._:-]+\b/gi, replacement: 'provider response reference' },
+]);
+
 const UNSAFE_DISPLAY_KEY_PATTERN = /(?:chain.*thought|hidden.*reasoning|internal.*policy|system.*policy|system.*prompt|developer.*instruction|raw.*provider|provider.*payload|provider.*response|response.*id|reasoning|think)/i;
 
 const SUPPORT_STOPWORDS = new Set([
@@ -109,6 +114,20 @@ function redactCredentialLikeText(value) {
   const warnings = new Set();
   let text = String(value ?? '');
   for (const { label, pattern, replacement } of SENSITIVE_DISPLAY_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (pattern.test(text)) {
+      warnings.add(`${label} redacted from AI display output`);
+      pattern.lastIndex = 0;
+      text = text.replace(pattern, replacement);
+    }
+  }
+  return { text, warnings: [...warnings] };
+}
+
+function redactInternalDisplayReferences(value) {
+  const warnings = new Set();
+  let text = String(value ?? '');
+  for (const { label, pattern, replacement } of INTERNAL_REFERENCE_DISPLAY_PATTERNS) {
     pattern.lastIndex = 0;
     if (pattern.test(text)) {
       warnings.add(`${label} redacted from AI display output`);
@@ -224,19 +243,22 @@ function stripHiddenReasoning(value) {
   return text.trim();
 }
 
-function sanitizeDisplayText(value, secrets, fallback = '') {
+function sanitizeDisplayText(value, secrets, fallback = '', { redactInternalReferences = true } = {}) {
   const redacted = redactSecrets(String(value ?? ''), secrets);
   const withoutReasoning = stripHiddenReasoning(redacted);
   const credentialSafe = redactCredentialLikeText(withoutReasoning);
+  const internalReferenceSafe = redactInternalReferences
+    ? redactInternalDisplayReferences(credentialSafe.text)
+    : { text: credentialSafe.text, warnings: [] };
   return {
-    text: credentialSafe.text.trim() || fallback,
-    warnings: credentialSafe.warnings,
+    text: internalReferenceSafe.text.trim() || fallback,
+    warnings: [...credentialSafe.warnings, ...internalReferenceSafe.warnings],
   };
 }
 
-function sanitizeDisplayValue(value, secrets, warnings) {
+function sanitizeDisplayValue(value, secrets, warnings, key = null) {
   if (typeof value === 'string') {
-    const sanitized = sanitizeDisplayText(value, secrets);
+    const sanitized = sanitizeDisplayText(value, secrets, '', { redactInternalReferences: key !== 'chunkId' });
     warnings.push(...sanitized.warnings);
     return sanitized.text;
   }
@@ -245,8 +267,8 @@ function sanitizeDisplayValue(value, secrets, warnings) {
   }
   if (isObject(value)) {
     return Object.fromEntries(Object.entries(value)
-      .filter(([key]) => !UNSAFE_DISPLAY_KEY_PATTERN.test(key))
-      .map(([key, item]) => [key, sanitizeDisplayValue(item, secrets, warnings)]));
+      .filter(([entryKey]) => !UNSAFE_DISPLAY_KEY_PATTERN.test(entryKey))
+      .map(([entryKey, item]) => [entryKey, sanitizeDisplayValue(item, secrets, warnings, entryKey)]));
   }
   return value;
 }
@@ -787,6 +809,7 @@ function unsupportedAnswer({ metadata, strategy, secrets, document }) {
     citationPolicy: 'no_citations_for_unsupported_answer',
   }, secrets);
   delete answerMetadata.retrievedChunks;
+  delete answerMetadata.retrievedChunkIds;
   return {
     text: displayState.message,
     displayText: displayState.message,
@@ -961,9 +984,9 @@ export function createDocumentAiService({ documents, aiProvider, retrievalProvid
         answer,
         citations: [],
         metadata: answer.metadata,
-        retrievedChunks: safeRetrievedChunks,
+        retrievedChunks: [],
       });
-      return { statusCode: 200, answer, retrievedChunks: safeRetrievedChunks };
+      return { statusCode: 200, answer, retrievedChunks: [] };
     }
 
     const promptId = strategy.contextStrategy === 'fallback' ? 'doculens.fallback' : 'doculens.chat';

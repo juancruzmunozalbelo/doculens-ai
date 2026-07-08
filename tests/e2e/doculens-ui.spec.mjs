@@ -44,10 +44,12 @@ const TEST_IDS = Object.freeze({
   aiDetails: 'ai.details',
   sourceCreate: 'source.create',
   sourceRail: 'source.rail',
+  sourceSearch: 'source.search',
   sourceCard: 'source.card',
   sourceStatus: 'source.status',
   activeSource: 'source.active',
   reviewBriefing: 'review.briefing',
+  briefingSearch: 'review.briefing-search',
   starterQuestions: 'review.starter-questions',
   starterQuestion: 'review.starter-question',
   trustSummary: 'trust.summary',
@@ -167,6 +169,18 @@ const longFilenameDocument = Object.freeze({
     sourceMethod: 'pdf',
     uploadedAt: '2026-07-07T12:00:00.000Z',
   },
+});
+
+const longStructuredBriefingDocument = Object.freeze({
+  id: 'doc-ui-long-structured-briefing-001',
+  title: 'Long Structured Procurement Review',
+  status: 'ready',
+  sourceType: 'pasted-text',
+  content: [
+    '# Long Structured Procurement Review',
+    'This source contains many requirements, risks, deliverables, and reviewer questions so the briefing must scroll without displacing chat.',
+    ...Array.from({ length: 36 }, (_, index) => `Control ${index + 1}: Procurement reviewers must validate ownership, credential rotation, release readiness, latency budgets, rollback planning, and evidence retention.`),
+  ].join('\n'),
 });
 
 const analysisMetadata = Object.freeze({
@@ -375,6 +389,212 @@ async function expectContainedNarrowSourcePreview(page) {
   expect(layout.previewScrollHeight).toBeGreaterThan(layout.previewClientHeight);
 }
 
+async function expectNoHorizontalPageOverflow(page) {
+  const metrics = await page.evaluate(() => ({
+    scrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 2);
+}
+
+async function expectDesktopLoginLayout(page) {
+  await expectNoHorizontalPageOverflow(page);
+  const layout = await page.evaluate((testIds) => {
+    const form = document.querySelector(`[data-testid="${testIds.loginSubmit}"]`)?.closest('form');
+    const hero = form?.previousElementSibling;
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
+    return {
+      viewportWidth: window.innerWidth,
+      hero: toRect(hero),
+      form: toRect(form),
+    };
+  }, TEST_IDS);
+
+  expect(layout.hero).toBeTruthy();
+  expect(layout.form).toBeTruthy();
+  expect(layout.hero.left).toBeGreaterThanOrEqual(-2);
+  expect(layout.hero.right).toBeLessThanOrEqual(layout.form.left + 8);
+  expect(layout.form.right).toBeLessThanOrEqual(layout.viewportWidth + 2);
+  expect(Math.abs(layout.hero.top - layout.form.top)).toBeLessThanOrEqual(24);
+}
+
+async function expectNarrowLoginLayout(page) {
+  await expectNoHorizontalPageOverflow(page);
+  const layout = await page.evaluate((testIds) => {
+    const form = document.querySelector(`[data-testid="${testIds.loginSubmit}"]`)?.closest('form');
+    const hero = form?.previousElementSibling;
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
+    return {
+      viewportWidth: window.innerWidth,
+      hero: toRect(hero),
+      form: toRect(form),
+    };
+  }, TEST_IDS);
+
+  expect(layout.hero).toBeTruthy();
+  expect(layout.form).toBeTruthy();
+  expect(layout.hero.left).toBeGreaterThanOrEqual(-2);
+  expect(layout.form.left).toBeGreaterThanOrEqual(-2);
+  expect(layout.hero.right).toBeLessThanOrEqual(layout.viewportWidth + 2);
+  expect(layout.form.right).toBeLessThanOrEqual(layout.viewportWidth + 2);
+  expect(layout.hero.bottom).toBeLessThanOrEqual(layout.form.top + 24);
+}
+
+
+async function expectDesktopAddSourceLayout(page) {
+  await expect(byTestId(page, 'sourceCreate')).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+  const layout = await page.evaluate((testIds) => {
+    const select = (name) => document.querySelector(`[data-testid="${testIds[name]}"]`);
+    const sourceCreate = select('sourceCreate');
+    const sourceRail = select('sourceRail');
+    const pdfPanel = select('pdfPanel');
+    const createColumn = sourceCreate?.parentElement;
+    const sourceColumn = createColumn?.nextElementSibling;
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
+    return {
+      viewportWidth: window.innerWidth,
+      sourceCreate: toRect(sourceCreate),
+      sourceRail: toRect(sourceRail),
+      pdfPanel: toRect(pdfPanel),
+      createColumn: toRect(createColumn),
+      sourceColumn: toRect(sourceColumn),
+    };
+  }, TEST_IDS);
+
+  expect(layout.sourceCreate).toBeTruthy();
+  expect(layout.sourceRail).toBeTruthy();
+  expect(layout.pdfPanel).toBeTruthy();
+  expect(layout.createColumn).toBeTruthy();
+  expect(layout.sourceColumn).toBeTruthy();
+  expect(layout.sourceCreate.left).toBeGreaterThanOrEqual(-2);
+  expect(layout.sourceColumn.left).toBeGreaterThanOrEqual(layout.createColumn.right - 8);
+  expect(layout.sourceRail.right).toBeLessThanOrEqual(layout.viewportWidth + 2);
+  expect(layout.pdfPanel.left).toBeGreaterThanOrEqual(layout.sourceCreate.left - 2);
+  expect(layout.pdfPanel.right).toBeLessThanOrEqual(layout.sourceCreate.right + 2);
+  expect(Math.abs(layout.createColumn.top - layout.sourceColumn.top)).toBeLessThanOrEqual(24);
+}
+
+async function expectNarrowAddSourceLayout(page) {
+  await expect(byTestId(page, 'sourceCreate')).toBeVisible();
+  await expect(byTestId(page, 'sourceRail')).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+  const layout = await page.evaluate((testIds) => {
+    const select = (name) => document.querySelector(`[data-testid="${testIds[name]}"]`);
+    const sourceCreate = select('sourceCreate');
+    const sourceRail = select('sourceRail');
+    const evidencePanel = select('evidencePanel') ?? [...document.querySelectorAll('section')].find((section) => /Source preview/i.test(section.innerText ?? ''));
+    const pdfPanel = select('pdfPanel');
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
+    const contained = (rect) => Boolean(rect && rect.left >= -2 && rect.right <= window.innerWidth + 2 && rect.width <= document.documentElement.clientWidth + 2);
+    return {
+      sourceCreate: toRect(sourceCreate),
+      sourceRail: toRect(sourceRail),
+      evidencePanel: toRect(evidencePanel),
+      pdfPanel: toRect(pdfPanel),
+      sourceCreateContained: contained(toRect(sourceCreate)),
+      sourceRailContained: contained(toRect(sourceRail)),
+      evidencePanelContained: contained(toRect(evidencePanel)),
+      pdfPanelContained: contained(toRect(pdfPanel)),
+    };
+  }, TEST_IDS);
+
+  expect(layout.sourceCreate).toBeTruthy();
+  expect(layout.sourceRail).toBeTruthy();
+  expect(layout.evidencePanel).toBeTruthy();
+  expect(layout.pdfPanel).toBeTruthy();
+  expect(layout.sourceCreateContained).toBe(true);
+  expect(layout.sourceRailContained).toBe(true);
+  expect(layout.evidencePanelContained).toBe(true);
+  expect(layout.pdfPanelContained).toBe(true);
+  expect(layout.sourceCreate.bottom).toBeLessThanOrEqual(layout.sourceRail.top + 24);
+  expect(layout.sourceRail.bottom).toBeLessThanOrEqual(layout.evidencePanel.top + 24);
+}
+
+
+async function expectDesktopReviewWorkspaceLayout(page, { expectAnswer = false } = {}) {
+  await expect(byTestId(page, 'activeSource')).toBeVisible();
+  await expect(byTestId(page, 'sourceRail')).toBeVisible();
+  await expect(byTestId(page, 'evidencePanel')).toBeVisible();
+  await expect(byTestId(page, 'reviewBriefing')).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+
+  const layout = await page.evaluate((testIds) => {
+    const select = (name) => document.querySelector(`[data-testid="${testIds[name]}"]`);
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width, height: rect.height } : null;
+    };
+    const chatInput = select('chatInput');
+    const chatSection = chatInput?.closest('section');
+    const chatBand = chatSection?.parentElement;
+    const answerCards = [...document.querySelectorAll(`[data-testid="${testIds.answerCard}"]`)];
+    return {
+      viewportWidth: window.innerWidth,
+      activeSource: toRect(select('activeSource')),
+      sourceRail: toRect(select('sourceRail')),
+      sourceManagement: toRect(select('sourceManagement')),
+      preview: toRect(select('evidencePanel')),
+      briefing: toRect(select('reviewBriefing')),
+      chatBand: toRect(chatBand),
+      chatInput: toRect(chatInput),
+      latestAnswer: toRect(answerCards.at(-1)),
+    };
+  }, TEST_IDS);
+
+  expect(layout.activeSource).toBeTruthy();
+  expect(layout.sourceRail).toBeTruthy();
+  expect(layout.sourceManagement).toBeTruthy();
+  expect(layout.preview).toBeTruthy();
+  expect(layout.briefing).toBeTruthy();
+  expect(layout.chatBand).toBeTruthy();
+  expect(layout.chatInput).toBeTruthy();
+
+  const layoutDebug = `desktop review layout boxes: ${JSON.stringify(layout)}`;
+  const sourceBandBottom = Math.max(layout.activeSource.bottom, layout.sourceManagement.bottom);
+  const middleRowTop = Math.min(layout.preview.top, layout.briefing.top);
+  expect(sourceBandBottom, layoutDebug).toBeLessThanOrEqual(middleRowTop + 16);
+  expect(layout.sourceRail.bottom, layoutDebug).toBeLessThanOrEqual(middleRowTop + 16);
+
+  expect(layout.preview.right, layoutDebug).toBeLessThanOrEqual(layout.briefing.left + 16);
+  const middleRowOverlap = Math.min(layout.preview.bottom, layout.briefing.bottom) - Math.max(layout.preview.top, layout.briefing.top);
+  expect(middleRowOverlap, layoutDebug).toBeGreaterThan(Math.min(layout.preview.height, layout.briefing.height) * 0.35);
+
+  expect(layout.chatBand.top, layoutDebug).toBeGreaterThanOrEqual(Math.max(layout.preview.bottom, layout.briefing.bottom) - 16);
+  expect(layout.chatBand.left, layoutDebug).toBeLessThanOrEqual(Math.min(layout.preview.left, layout.briefing.left) + 8);
+  expect(layout.chatBand.right, layoutDebug).toBeGreaterThanOrEqual(Math.max(layout.preview.right, layout.briefing.right) - 8);
+  expect(layout.chatBand.right, layoutDebug).toBeLessThanOrEqual(layout.viewportWidth + 2);
+
+  if (expectAnswer) {
+    expect(layout.latestAnswer).toBeTruthy();
+    expect(layout.latestAnswer.left).toBeGreaterThanOrEqual(layout.chatBand.left - 2);
+    expect(layout.latestAnswer.right).toBeLessThanOrEqual(layout.chatBand.right + 2);
+    expect(layout.latestAnswer.top).toBeGreaterThanOrEqual(layout.chatBand.top - 2);
+  }
+}
+
+async function expectLatestAnswerScrolledIntoView(page) {
+  await expect.poll(async () => page.evaluate((testIds) => {
+    const answerCards = [...document.querySelectorAll(`[data-testid="${testIds.answerCard}"]`)];
+    const latestAnswer = answerCards.at(-1);
+    const rect = latestAnswer?.getBoundingClientRect();
+    return Boolean(rect && window.scrollY > 0 && rect.top >= -2 && rect.top <= window.innerHeight * 0.7 && rect.bottom > 0);
+  }, TEST_IDS)).toBe(true);
+}
+
+
 
 function analysisFor(document) {
   return {
@@ -405,6 +625,39 @@ function assessmentAnalysisFor() {
     risks: assessmentGoldenAssertions.analysis.risks.mustMentionSupportedOrDerived.map((text) => ({ severity: 'medium', text, derivedReviewerRisk: true })),
     uncertainties: ['The assessment leaves implementation choices to the candidate when the source does not mandate one.'],
     recommendedQuestions: assessmentGoldenAssertions.analysis.recommendedQuestions,
+    metadata: analysisMetadata,
+  };
+}
+
+function longStructuredAnalysisFor() {
+  const rows = Array.from({ length: 24 }, (_, index) => index + 1);
+  return {
+    summary: 'Long structured procurement briefing covering credential controls, release governance, latency budgets, rollback readiness, and reviewer evidence retention.',
+    sections: rows.slice(0, 14).map((number) => ({ title: `Assessment part ${number}`, summary: `Part ${number} covers procurement review controls, ownership evidence, and launch readiness.` })),
+    entities: [
+      { name: 'Procurement Review Board', type: 'reviewer' },
+      { name: 'Platform Delivery Team', type: 'owner' },
+      { name: 'Security Operations', type: 'control owner' },
+    ],
+    requirements: rows.map((number) => ({
+      category: number % 2 ? 'Security requirement' : 'Operations requirement',
+      text: number === 1
+        ? 'Credential rotation must be completed before production launch and verified by the reviewer.'
+        : `Requirement ${number}: owners must provide mapped evidence, decision records, and acceptance notes before approval.`,
+    })),
+    deliverables: rows.slice(0, 16).map((number) => ({
+      text: number === 1
+        ? 'The reviewer pack must include a rollback checklist, evidence index, and decision owner list.'
+        : `Deliverable ${number}: include source excerpts, reviewer notes, and signed acceptance evidence.`,
+    })),
+    risks: rows.map((number) => ({
+      severity: number % 3 === 0 ? 'high' : 'medium',
+      text: number === 1
+        ? 'Latency budget risk must be escalated when AI response time threatens the review workflow.'
+        : `Risk ${number}: unresolved ownership, missing rollback evidence, or stale approvals can delay release.`,
+    })),
+    uncertainties: rows.slice(0, 10).map((number) => `Uncertainty ${number}: the source does not identify every approval substitute for outage scenarios.`),
+    recommendedQuestions: rows.slice(0, 12).map((number) => `Which evidence item ${number} supports release readiness?`),
     metadata: analysisMetadata,
   };
 }
@@ -561,7 +814,7 @@ async function installDocuLensApiFake(page, {
       if (delayAnalysisUntil) {
         await delayAnalysisUntil(route.request());
       }
-      await fulfillJson(route, 201, { analysis: document.id === assessmentDocumentId ? assessmentAnalysisFor() : document.id === fallbackBriefingDocument.id ? fallbackOnlyAnalysisFor() : analysisFor(document) });
+      await fulfillJson(route, 201, { analysis: document.id === assessmentDocumentId ? assessmentAnalysisFor() : document.id === longStructuredBriefingDocument.id ? longStructuredAnalysisFor() : document.id === fallbackBriefingDocument.id ? fallbackOnlyAnalysisFor() : analysisFor(document) });
     });
 
     await page.route(`**/api/documents/${documentId}/chat`, async (route) => {
@@ -616,7 +869,7 @@ async function installDocuLensApiFake(page, {
         return;
       }
 
-      if (/stock price|outside/i.test(question)) {
+      if (/stock price|outside|what time is|current time|current date/i.test(question)) {
         await fulfillJson(route, 200, {
           answer: {
             text: 'This question is outside this document. Try asking about confidentiality duties, return obligations, or disclosure exceptions in the selected source.',
@@ -777,6 +1030,180 @@ async function expectElementReceivesPointer(page, locator) {
   expect(receivesPointer).toBe(true);
 }
 
+test('desktop source-first review workspace keeps source, briefing, and chat rows ordered and scrolls latest answer into view', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 560 });
+  await installDocuLensApiFake(page, { documents: [sampleDocument] });
+  await page.goto('/');
+
+  await expectLoginControls(page);
+  await expectDesktopLoginLayout(page);
+  await byTestId(page, 'email').fill('demo@doculens.local');
+  await byTestId(page, 'password').fill('Correct Horse Battery Staple');
+  await byTestId(page, 'loginSubmit').click();
+
+  await expect(byTestId(page, 'sourceCreate')).toBeVisible();
+  await expectDesktopAddSourceLayout(page);
+
+  await openSampleSource(page);
+  await expect(byTestId(page, 'activeSource')).toContainText(sampleDocument.title);
+  await expect(byTestId(page, 'evidencePanel')).toContainText(sampleDocument.title);
+  await expect(byTestId(page, 'reviewBriefing')).toContainText(/Generate (review )?(summary|briefing)/i);
+  await expectDesktopReviewWorkspaceLayout(page);
+
+  const question = 'What must Acme keep confidential?';
+  await askQuestion(page, question);
+  const answerCard = byTestId(page, 'answerCard').filter({ hasText: question }).first();
+  await expect(answerCard).toContainText('Acme must protect Beta financial information for three years');
+  await expectDesktopReviewWorkspaceLayout(page, { expectAnswer: true });
+  await expectLatestAnswerScrolledIntoView(page);
+});
+
+test('narrow login and add-source intake avoid horizontal overflow while keeping source controls usable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 760 });
+  await installDocuLensApiFake(page, { documents: [sampleDocument, longFilenameDocument], documentDetails: [sampleDocument, longFilenameDocument] });
+  await page.goto('/');
+
+  await expectLoginControls(page);
+  await expectNarrowLoginLayout(page);
+  await byTestId(page, 'email').fill('demo@doculens.local');
+  await byTestId(page, 'password').fill('Correct Horse Battery Staple');
+  await byTestId(page, 'loginSubmit').click();
+
+  await expectNarrowAddSourceLayout(page);
+  await expectElementReceivesPointer(page, page.getByLabel('Upload PDF'));
+  await expectElementReceivesPointer(page, page.getByLabel('Paste text'));
+  await expectElementReceivesPointer(page, page.getByLabel('Try sample'));
+  await expectElementReceivesPointer(page, byTestId(page, 'pdfSubmit'));
+
+  const sourceCard = byTestId(page, 'sourceCard').filter({ hasText: sampleDocument.title }).first();
+  await expect(sourceCard).toBeVisible();
+  for (const button of [
+    sourceCard.getByRole('button', { name: /^Open$/ }),
+    sourceCard.getByRole('button', { name: /Rename source/i }),
+    sourceCard.getByRole('button', { name: /Delete source/i }),
+  ]) {
+    await expect(button).toBeEnabled();
+    await expectElementReceivesPointer(page, button);
+  }
+
+  await page.getByLabel('Paste text').check();
+  await expect(byTestId(page, 'pastePanel')).toBeVisible();
+  await expectNoHorizontalPageOverflow(page);
+  await expectElementReceivesPointer(page, byTestId(page, 'documentTitle'));
+  await expectElementReceivesPointer(page, byTestId(page, 'documentContent'));
+  await expectElementReceivesPointer(page, byTestId(page, 'documentSubmit'));
+});
+
+test('long structured briefing stays scrollable, filters briefing cards, and leaves chat reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await installDocuLensApiFake(page, { documents: [longStructuredBriefingDocument], documentDetails: [longStructuredBriefingDocument] });
+  await signIn(page);
+
+  await byTestId(page, 'sourceCard').filter({ hasText: longStructuredBriefingDocument.title }).first().click();
+  await byTestId(page, 'documentAnalyze').click();
+
+  const briefing = byTestId(page, 'reviewBriefing');
+  await expect(briefing).toContainText(/Long structured procurement briefing/i);
+  await expect(briefing).toContainText(/Requirements|Deliverables|Risks and trade-offs|Recommended questions/i);
+  await expect(byTestId(page, 'briefingSearch')).toBeVisible();
+
+  const boundedLayout = await page.evaluate((testIds) => {
+    const select = (name) => document.querySelector(`[data-testid="${testIds[name]}"]`);
+    const briefingNode = select('reviewBriefing');
+    const scrollRegion = briefingNode?.querySelector('[aria-label="Scrollable briefing results"]');
+    const chatInput = select('chatInput');
+    const chatBand = chatInput?.closest('section')?.parentElement;
+    const toRect = (element) => {
+      const rect = element?.getBoundingClientRect();
+      return rect ? { top: rect.top, bottom: rect.bottom, height: rect.height } : null;
+    };
+    return {
+      viewportHeight: window.innerHeight,
+      briefing: toRect(briefingNode),
+      scrollClientHeight: scrollRegion?.clientHeight ?? 0,
+      scrollScrollHeight: scrollRegion?.scrollHeight ?? 0,
+      scrollOverflowY: scrollRegion ? getComputedStyle(scrollRegion).overflowY : '',
+      chatBand: toRect(chatBand),
+      chatInput: toRect(chatInput),
+    };
+  }, TEST_IDS);
+  const boundedDebug = `bounded briefing layout: ${JSON.stringify(boundedLayout)}`;
+  expect(boundedLayout.briefing, boundedDebug).toBeTruthy();
+  expect(boundedLayout.chatBand, boundedDebug).toBeTruthy();
+  expect(boundedLayout.chatInput, boundedDebug).toBeTruthy();
+  expect(boundedLayout.scrollOverflowY, boundedDebug).toMatch(/auto|scroll/i);
+  expect(boundedLayout.scrollScrollHeight, boundedDebug).toBeGreaterThan(boundedLayout.scrollClientHeight + 120);
+  expect(boundedLayout.scrollClientHeight, boundedDebug).toBeLessThanOrEqual(Math.ceil(boundedLayout.viewportHeight * 0.52));
+  expect(boundedLayout.chatBand.top, boundedDebug).toBeGreaterThanOrEqual(boundedLayout.briefing.bottom - 16);
+  expect(boundedLayout.chatBand.top, boundedDebug).toBeLessThan(boundedLayout.viewportHeight + 200);
+
+  await byTestId(page, 'briefingSearch').fill('credential rotation');
+  await expect(briefing.getByRole('heading', { name: /^Requirements$/ })).toBeVisible();
+  await expect(briefing).toContainText(/Credential rotation must be completed/i);
+  await expect(briefing.getByRole('heading', { name: /Risks and trade-offs/i })).toHaveCount(0);
+  await expect(briefing.getByRole('heading', { name: /^Deliverables$/ })).toHaveCount(0);
+
+  await byTestId(page, 'briefingSearch').fill('latency budget risk');
+  await expect(briefing.getByRole('heading', { name: /Risks and trade-offs/i })).toBeVisible();
+  await expect(briefing).toContainText(/Latency budget risk must be escalated/i);
+  await expect(briefing.getByRole('heading', { name: /^Requirements$/ })).toHaveCount(0);
+
+  await byTestId(page, 'briefingSearch').fill('zzzzz no matching briefing item');
+  await expect(briefing).toContainText(/No briefing items match "zzzzz no matching briefing item"/i);
+  await expect(briefing.getByRole('heading', { name: /^Summary$/ })).toHaveCount(0);
+  await expect(briefing.getByRole('heading', { name: /^Requirements$/ })).toHaveCount(0);
+  await expect(briefing.getByRole('heading', { name: /Risks and trade-offs/i })).toHaveCount(0);
+});
+
+test('source search filters cards by title and filename while keeping compact controls visible', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await installDocuLensApiFake(page, {
+    documents: [sampleDocument, longFilenameDocument, recentListDocument],
+    documentDetails: [sampleDocument, longFilenameDocument, recentDetailedDocument],
+  });
+  await signIn(page);
+
+  await expect(byTestId(page, 'sourceSearch')).toBeVisible();
+  await byTestId(page, 'sourceSearch').fill('Final_Final.pdf');
+  const filenameMatch = byTestId(page, 'sourceCard').filter({ hasText: /Final_Final\.pdf|Reviewer Notes 2026 Final Final/i }).first();
+  await expect(filenameMatch).toBeVisible();
+  await expect(byTestId(page, 'sourceCard').filter({ hasText: sampleDocument.title })).toHaveCount(0);
+  await expect(byTestId(page, 'sourceCard').filter({ hasText: recentListDocument.title })).toHaveCount(0);
+
+  for (const button of [
+    filenameMatch.getByRole('button', { name: /^Open$/ }),
+    filenameMatch.getByRole('button', { name: /Rename source/i }),
+    filenameMatch.getByRole('button', { name: /Delete source/i }),
+  ]) {
+    await expect(button).toBeVisible();
+    await expect(button).toBeEnabled();
+  }
+
+  const compactRail = await page.evaluate((testIds) => {
+    const rail = document.querySelector(`[data-testid="${testIds.sourceRail}"]`);
+    const cards = [...document.querySelectorAll(`[data-testid="${testIds.sourceCard}"]`)];
+    const rect = (element) => {
+      const bounds = element?.getBoundingClientRect();
+      return bounds ? { height: bounds.height, top: bounds.top, bottom: bounds.bottom } : null;
+    };
+    return {
+      viewportHeight: window.innerHeight,
+      rail: rect(rail),
+      cardHeights: cards.map((card) => rect(card)?.height ?? 0),
+    };
+  }, TEST_IDS);
+  const compactDebug = `compact source rail layout: ${JSON.stringify(compactRail)}`;
+  expect(compactRail.rail, compactDebug).toBeTruthy();
+  expect(Math.max(...compactRail.cardHeights), compactDebug).toBeLessThanOrEqual(Math.ceil(compactRail.viewportHeight * 0.35));
+  expect(compactRail.rail.height, compactDebug).toBeLessThanOrEqual(Math.ceil(compactRail.viewportHeight * 0.35));
+
+  await byTestId(page, 'sourceSearch').fill('Seed NDA');
+  const titleMatch = byTestId(page, 'sourceCard').filter({ hasText: sampleDocument.title }).first();
+  await expect(titleMatch).toBeVisible();
+  await expect(byTestId(page, 'sourceCard').filter({ hasText: longFilenameDocument.title })).toHaveCount(0);
+});
+
+
 test('source-first notebook creates a ready active source, offers briefing and starter questions before analysis, and keeps chat scoped to the source', async ({ page }) => {
   let releaseAnalysis;
   const analysisRequestSeen = new Promise((resolve) => {
@@ -898,6 +1325,13 @@ test('full-document overview and broad source requirement questions render cavea
   await expect(byTestId(page, 'unsupported')).toContainText(/Outside this document|not supported by this document/i);
   await expect(unsupportedCard).toContainText(/Ask about|confidentiality|duties|sections/i);
   await expect(unsupportedCard).not.toContainText(/generic error|Traceback|outside_document_scope|no_citations_for_unsupported_answer/i);
+
+  await askQuestion(page, 'what time is?');
+  const currentTimeCard = byTestId(page, 'answerCard').filter({ hasText: /what time is\?/i }).first();
+  await expect(currentTimeCard).toContainText(/Outside this source|Outside this document|not supported by this document/i);
+  await expect(currentTimeCard.getByTestId(TEST_IDS.chatCitations)).toHaveCount(0);
+  await expect(currentTimeCard.getByTestId(TEST_IDS.chatRetrievedChunks)).toHaveCount(0);
+  await expect(currentTimeCard).not.toContainText(/chunk_|018f4d31|provider_response_id|provider payload|raw metadata|outside_document_scope|no_citations_for_unsupported_answer/i);
   await expectQuietPrimaryCopy(page);
   await expectNoUnsafeReviewerArtifacts(page);
 });
