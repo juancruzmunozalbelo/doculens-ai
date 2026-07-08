@@ -635,10 +635,10 @@ function AppStyles() {
       .workspace-briefing { grid-area: briefing; min-width: 0; }
       .workspace-chat-band { grid-area: chat; display: grid; gap: 1rem; min-width: 0; scroll-margin-top: 1rem; }
       .source-management-panel { min-width: 0; overflow: hidden; padding: 0.85rem !important; }
-      .source-management-header { display: flex; align-items: end; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-block-end: 0.65rem; }
+      .source-management-header { display: grid; gap: 0.5rem; align-items: start; margin-block-end: 0.65rem; }
       .source-management-header h2 { margin: 0; }
       .source-management-header p { margin: 0.25rem 0 0; color: #64748b; }
-      .source-search-input, .briefing-search-input { width: min(24rem, 100%); border: 1px solid #cbd5e1; border-radius: 999px; padding: 0.55rem 0.8rem; font: inherit; background: #ffffff; }
+      .source-search-input, .briefing-search-input { width: min(28rem, 100%); border: 1px solid #cbd5e1; border-radius: 999px; padding: 0.55rem 0.8rem; font: inherit; background: #ffffff; }
       .source-rail-list { display: flex; gap: 0.65rem; overflow-x: auto; overscroll-behavior-inline: contain; padding-bottom: 0.2rem; scroll-snap-type: x proximity; }
       .source-rail-list [data-testid="${TEST_IDS.sourceCard}"] { flex: 0 0 min(17rem, 78vw); scroll-snap-align: start; }
       .review-briefing-panel { height: clamp(20rem, 52vh, 34rem); overflow: hidden; display: flex; flex-direction: column; align-self: start; }
@@ -862,7 +862,7 @@ function SourceRail({ documents, activeDocument, pendingSource, loading, onOpenD
           <h2 id="sources-heading">Sources</h2>
           <p>Open, rename, delete, or search sources. Scroll sideways when several sources are available.</p>
         </div>
-        <label style={{ ...fieldStyle, margin: 0, minWidth: 'min(24rem, 100%)' }}>Search sources<input data-testid={TEST_IDS.sourceSearch} className="source-search-input" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} placeholder="Search title, filename, type…" /></label>
+        <label style={{ ...fieldStyle, margin: 0, width: 'min(28rem, 100%)' }}>Search sources<input data-testid={TEST_IDS.sourceSearch} className="source-search-input" value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} placeholder="Search title, filename, type…" /></label>
       </div>
       {visibleCards.length === 0 ? <OperationStatus empty={`No sources match "${sanitizeDisplayText(sourceQuery, 'that search')}".`} /> : null}
       <div data-testid={TEST_IDS.sourceRail} role="list" className="source-rail-list">
